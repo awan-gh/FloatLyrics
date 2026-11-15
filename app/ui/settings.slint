@@ -1,0 +1,524 @@
+import { Button, CheckBox, Switch, Slider, ComboBox, LineEdit, ScrollView, StandardListView, ListView, Palette } from "std-widgets.slint";
+
+export struct SourceItem { name: string, enabled: bool, note: string }
+export struct MenuItem { text: string, checked: bool, arrow: int } // arrow: 0 none, 1 submenu, 2 back
+export struct GfRow { name: string, category: string, preview: image, installed: bool }
+
+component Card inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    background: Palette.control-background;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: Palette.border;
+    VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+        Text { text: root.title; font-size: 15px; font-weight: 600; }
+        if root.subtitle != "": Text { text: root.subtitle; font-size: 12px; color: Palette.foreground.with-alpha(0.65); wrap: word-wrap; }
+        @children
+    }
+}
+
+component Row inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> hint;
+    spacing: 16px;
+    VerticalLayout {
+        alignment: center;
+        horizontal-stretch: 1;
+        Text { text: root.label; font-size: 14px; }
+        if root.hint != "": Text { text: root.hint; font-size: 12px; color: Palette.foreground.with-alpha(0.6); wrap: word-wrap; }
+    }
+    @children
+}
+
+component ValueSlider inherits HorizontalLayout {
+    in-out property <float> value;
+    in property <float> minimum;
+    in property <float> maximum;
+    in property <int> decimals: 2;
+    callback edited();
+    spacing: 8px;
+    Slider { width: 200px; minimum: root.minimum; maximum: root.maximum; value <=> root.value; changed => { root.edited(); } }
+    Text {
+        width: 48px; vertical-alignment: center; horizontal-alignment: right;
+        text: root.decimals == 0 ? round(root.value) : round(root.value * 100) / 100;
+    }
+}
+
+component ColorField inherits HorizontalLayout {
+    in-out property <string> value;
+    in property <color> swatch;
+    callback edited();
+    callback pick();
+    spacing: 8px;
+    Rectangle {
+        width: 32px; height: 32px; border-radius: 6px; border-width: 1px; border-color: Palette.border;
+        background: root.swatch;
+        TouchArea { clicked => { root.pick(); } mouse-cursor: pointer; }
+    }
+    LineEdit { width: 130px; text <=> root.value; edited => { root.edited(); } }
+}
+
+component NavItem inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> selected;
+    callback clicked();
+    height: 38px;
+    border-radius: 6px;
+    background: root.selected || touch.has-hover ? Palette.foreground.with-alpha(0.07) : transparent;
+    Rectangle { x: 0; width: 3px; height: 16px; border-radius: 2px; background: Palette.accent-background; visible: root.selected; }
+    HorizontalLayout {
+        padding-left: 14px; spacing: 12px;
+        Image { source: root.icon; width: 18px; height: 18px; y: (parent.height - 18px) / 2; colorize: Palette.foreground; }
+        Text { text: root.text; font-size: 14px; vertical-alignment: center; }
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+export component SettingsWindow inherits Window {
+    title: "FloatLyrics Settings";
+    preferred-width: 860px;
+    preferred-height: 700px;
+    min-width: 660px;
+    min-height: 420px;
+    icon: @image-url("icon.png");
+
+    callback changed();          // any value edited -> Rust reads everything back, applies, saves
+    callback pick-color(string); // which colour field
+    callback filter-fonts(string);
+    callback browse-lyrics-dir();
+    callback reset-lyrics-dir();
+    callback open-lyrics-dir();
+    callback move-source(int, int);
+    callback toggle-source(int, bool);
+    callback add-font-file();
+    callback open-fonts-dir();
+    callback check-updates();
+    callback retranslate();
+    callback rekey();
+    callback browse-google-fonts();
+    callback pick-font(string);
+
+    in-out property <int> page: 0;
+
+    // text
+    in-out property <string> font-family;
+    in property <[StandardListViewItem]> font-matches;
+    in-out property <float> font-size;
+    in-out property <bool> bold;
+    in-out property <bool> italic;
+    in-out property <string> edge-style;
+    in-out property <float> outline-width;
+    in-out property <bool> karaoke;
+    in-out property <bool> duet-view;
+    in property <string> font-status;
+    // colours
+    in-out property <string> text-color;
+    in-out property <string> highlight-color;
+    in-out property <string> highlight-color2;
+    in-out property <string> next-color;
+    in-out property <string> outline-color;
+    in-out property <string> bg-color;
+    in property <color> sw-text; in property <color> sw-hl; in property <color> sw-hl2; in property <color> sw-next; in property <color> sw-outline; in property <color> sw-bg;
+    in-out property <string> fill-style;
+    in-out property <string> bg-mode;
+    in-out property <float> bg-opacity;
+    in-out property <float> overlay-opacity;
+    // layout
+    in-out property <float> lines-before;
+    in-out property <float> lines-after;
+    in-out property <float> next-scale;
+    in-out property <string> align;
+    in-out property <float> width-px;
+    in property <float> screen-width;
+    in-out property <string> anim-style;
+    in-out property <float> anim-ms;
+    in-out property <bool> click-through;
+    in-out property <bool> show-frame;
+    in-out property <bool> hide-when-idle;
+    in-out property <bool> hide-when-no-lyrics;
+    in-out property <float> global-offset;
+    // translation
+    in-out property <string> translation-lang;
+    in-out property <bool> show-romaji;
+    in-out property <bool> romaji-main;
+    in-out property <bool> sub-all-lines;
+    in-out property <float> sub-scale;
+    // sources + storage
+    in property <[SourceItem]> sources;
+    in property <string> lyrics-dir;
+    // taskbar
+    in-out property <bool> taskbar-lyrics;
+    in-out property <string> taskbar-side;
+    in-out property <float> taskbar-width;
+    // shortcuts
+    in-out property <string> key-click-through;
+    in-out property <string> peek-keys;
+    in-out property <string> key-hide;
+    in-out property <string> key-sooner;
+    in-out property <string> key-later;
+    in-out property <string> key-tap-sync;
+    in-out property <string> key-reset-offset;
+    in-out property <string> key-centre;
+    in-out property <string> key-taskbar;
+    in property <string> hotkey-errors;
+    // app
+    in-out property <string> update-mode;
+    in-out property <bool> autostart;
+    in property <string> update-status;
+    in property <string> version;
+
+    HorizontalLayout {
+        // sidebar
+        VerticalLayout {
+            width: 210px;
+            padding: 8px;
+            padding-top: 16px;
+            spacing: 2px;
+            alignment: start;
+            NavItem { text: "Text"; icon: @image-url("icons/text.svg"); selected: root.page == 0; clicked => { root.page = 0; } }
+            NavItem { text: "Colours & fill"; icon: @image-url("icons/colours.svg"); selected: root.page == 1; clicked => { root.page = 1; } }
+            NavItem { text: "Layout"; icon: @image-url("icons/layout.svg"); selected: root.page == 2; clicked => { root.page = 2; } }
+            NavItem { text: "Translation"; icon: @image-url("icons/translation.svg"); selected: root.page == 3; clicked => { root.page = 3; } }
+            NavItem { text: "Lyrics sources"; icon: @image-url("icons/sources.svg"); selected: root.page == 4; clicked => { root.page = 4; } }
+            NavItem { text: "Taskbar"; icon: @image-url("icons/taskbar.svg"); selected: root.page == 5; clicked => { root.page = 5; } }
+            NavItem { text: "Shortcuts"; icon: @image-url("icons/shortcuts.svg"); selected: root.page == 6; clicked => { root.page = 6; } }
+            NavItem { text: "Updates & about"; icon: @image-url("icons/updates.svg"); selected: root.page == 7; clicked => { root.page = 7; } }
+        }
+
+        ScrollView {
+            VerticalLayout {
+                padding: 24px;
+                padding-top: 12px;
+                spacing: 14px;
+                alignment: start;
+
+                Text {
+                    font-size: 28px; font-weight: 600;
+                    text: ["Text", "Colours & fill", "Layout", "Translation", "Lyrics sources", "Taskbar", "Shortcuts", "Updates & about"][root.page];
+                }
+
+                // ---------------- Text ----------------
+                if root.page == 0: VerticalLayout {
+                    spacing: 14px;
+                    Card {
+                        title: "Font";
+                        subtitle: "Click a font to use it. Fonts you add or download from Google Fonts appear here too.";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text { text: "Current: " + root.font-family; font-size: 14px; font-weight: 600; vertical-alignment: center; horizontal-stretch: 1; }
+                            Button { text: "Browse Google Fonts…"; primary: true; clicked => { root.browse-google-fonts(); } }
+                        }
+                        LineEdit { placeholder-text: "Search installed fonts…"; edited => { root.filter-fonts(self.text); } }
+                        StandardListView {
+                            height: 200px; model: root.font-matches;
+                            current-item-changed(i) => { if (i >= 0) { root.pick-font(root.font-matches[i].text); } }
+                        }
+                        Row {
+                            label: "Font files";
+                            hint: root.font-status;
+                            Button { text: "Add font file…"; clicked => { root.add-font-file(); } }
+                            Button { text: "Open fonts folder"; clicked => { root.open-fonts-dir(); } }
+                        }
+                        Row { label: "Size"; ValueSlider { minimum: 12; maximum: 140; decimals: 0; value <=> root.font-size; edited => { root.changed(); } } }
+                        Row { label: "Bold"; Switch { checked <=> root.bold; toggled => { root.changed(); } } }
+                        Row { label: "Italic"; Switch { checked <=> root.italic; toggled => { root.changed(); } } }
+                    }
+                    Card {
+                        title: "Edge";
+                        subtitle: "Like subtitle settings: outline, drop shadow, raised or depressed text";
+                        Row {
+                            label: "Edge style";
+                            ComboBox { width: 160px; model: ["None", "Outline", "Shadow", "Raised", "Depressed"]; current-value <=> root.edge-style; selected => { root.changed(); } }
+                        }
+                        Row { label: "Edge size"; ValueSlider { minimum: 0; maximum: 10; value <=> root.outline-width; edited => { root.changed(); } } }
+                    }
+                    Card {
+                        title: "Karaoke";
+                        Row { label: "Karaoke wipe"; hint: "Fills the current line word by word as it is sung"; Switch { checked <=> root.karaoke; toggled => { root.changed(); } } }
+                        Row { label: "Duet view"; hint: "Puts singers left/right when the lyric source marks them"; Switch { checked <=> root.duet-view; toggled => { root.changed(); } } }
+                    }
+                }
+
+                // ---------------- Colours ----------------
+                if root.page == 1: VerticalLayout {
+                    spacing: 14px;
+                    Card {
+                        title: "Text colours";
+                        subtitle: "Click a swatch to pick. Format #AARRGGBB — AA is transparency (FF solid, 00 invisible).";
+                        Row { label: "Current line"; ColorField { value <=> root.text-color; swatch: root.sw-text; edited => { root.changed(); } pick => { root.pick-color("text"); } } }
+                        Row { label: "Other lines"; ColorField { value <=> root.next-color; swatch: root.sw-next; edited => { root.changed(); } pick => { root.pick-color("next"); } } }
+                        Row { label: "Edge / outline"; ColorField { value <=> root.outline-color; swatch: root.sw-outline; edited => { root.changed(); } pick => { root.pick-color("outline"); } } }
+                    }
+                    Card {
+                        title: "Sung-part fill";
+                        subtitle: "How the karaoke wipe colours the words";
+                        Row {
+                            label: "Fill style";
+                            ComboBox { width: 160px; model: ["Solid", "Gradient", "Rainbow"]; current-value <=> root.fill-style; selected => { root.changed(); } }
+                        }
+                        Row { label: root.fill-style == "Gradient" ? "Gradient start" : "Colour"; ColorField { value <=> root.highlight-color; swatch: root.sw-hl; edited => { root.changed(); } pick => { root.pick-color("hl"); } } }
+                        if root.fill-style == "Gradient": Row { label: "Gradient end"; ColorField { value <=> root.highlight-color2; swatch: root.sw-hl2; edited => { root.changed(); } pick => { root.pick-color("hl2"); } } }
+                    }
+                    Card {
+                        title: "Background";
+                        Row {
+                            label: "Background";
+                            hint: "Behind each line = caption style, hugging the words";
+                            ComboBox { width: 180px; model: ["None", "Block", "Line"]; current-value <=> root.bg-mode; selected => { root.changed(); } }
+                        }
+                        Row { label: "Background colour"; ColorField { value <=> root.bg-color; swatch: root.sw-bg; edited => { root.changed(); } pick => { root.pick-color("bg"); } } }
+                        Row { label: "Background opacity"; ValueSlider { minimum: 0; maximum: 1; value <=> root.bg-opacity; edited => { root.changed(); } } }
+                        Row { label: "Overall opacity"; ValueSlider { minimum: 0.1; maximum: 1; value <=> root.overlay-opacity; edited => { root.changed(); } } }
+                    }
+                }
+
+                // ---------------- Layout ----------------
+                if root.page == 2: VerticalLayout {
+                    spacing: 14px;
+                    Card {
+                        title: "Lines";
+                        Row { label: "Lines before current"; ValueSlider { minimum: 0; maximum: 5; decimals: 0; value <=> root.lines-before; edited => { root.changed(); } } }
+                        Row { label: "Lines after current"; ValueSlider { minimum: 0; maximum: 10; decimals: 0; value <=> root.lines-after; edited => { root.changed(); } } }
+                        Row { label: "Other lines size"; hint: "Relative to the current line"; ValueSlider { minimum: 0.3; maximum: 1; value <=> root.next-scale; edited => { root.changed(); } } }
+                        Row { label: "Alignment"; ComboBox { width: 160px; model: ["Left", "Center", "Right"]; current-value <=> root.align; selected => { root.changed(); } } }
+                        Row { label: "Window width"; ValueSlider { minimum: 300; maximum: root.screen-width; decimals: 0; value <=> root.width-px; edited => { root.changed(); } } }
+                    }
+                    Card {
+                        title: "Animation";
+                        subtitle: "How lines move when the song reaches the next line";
+                        Row { label: "Style"; hint: "Slide = scroll up with a fade"; ComboBox { width: 160px; model: ["Off", "Fade", "Slide"]; current-value <=> root.anim-style; selected => { root.changed(); } } }
+                        Row { label: "Duration (ms)"; ValueSlider { minimum: 100; maximum: 1000; decimals: 0; value <=> root.anim-ms; edited => { root.changed(); } } }
+                    }
+                    Card {
+                        title: "Window";
+                        Row { label: "Click-through"; hint: "Clicks go to whatever is underneath. Hold the grab keys to move it."; Switch { checked <=> root.click-through; toggled => { root.changed(); } } }
+                        Row { label: "Frame while movable"; hint: "Box and border when the overlay can be dragged"; Switch { checked <=> root.show-frame; toggled => { root.changed(); } } }
+                        Row { label: "Hide when nothing plays"; Switch { checked <=> root.hide-when-idle; toggled => { root.changed(); } } }
+                        Row { label: "Hide when no lyrics found"; hint: "Stays hidden for songs without lyrics; hold the grab keys to see it"; Switch { checked <=> root.hide-when-no-lyrics; toggled => { root.changed(); } } }
+                        Row { label: "Global timing offset (s)"; hint: "Shifts every song; per-song offsets come on top"; ValueSlider { minimum: -5; maximum: 5; value <=> root.global-offset; edited => { root.changed(); } } }
+                    }
+                }
+
+                // ---------------- Translation ----------------
+                if root.page == 3: Card {
+                    title: "Translation & romanisation";
+                    subtitle: "Uses Google Translate — the song's lyric text is sent to Google";
+                    Row {
+                        label: "Translate to"; hint: "Language code such as en or id. Leave empty to turn off.";
+                        LineEdit { width: 140px; text <=> root.translation-lang; accepted => { root.changed(); root.retranslate(); } edited => { root.changed(); } }
+                    }
+                    Row { label: "Romaji as main line"; hint: "Sing along in Latin letters: romanisation becomes the big line"; Switch { checked <=> root.romaji-main; toggled => { root.changed(); root.retranslate(); } } }
+                    Row { label: "Show romanisation / original underneath"; hint: "Romaji under the line, or the original script when romaji is the main line"; Switch { checked <=> root.show-romaji; toggled => { root.changed(); root.retranslate(); } } }
+                    Row { label: "Show on all lines"; hint: "Otherwise only under the current line"; Switch { checked <=> root.sub-all-lines; toggled => { root.changed(); } } }
+                    Row { label: "Sub-line size"; ValueSlider { minimum: 0.3; maximum: 1; value <=> root.sub-scale; edited => { root.changed(); } } }
+                }
+
+                // ---------------- Sources ----------------
+                if root.page == 4: VerticalLayout {
+                    spacing: 14px;
+                    Card {
+                        title: "Priority";
+                        subtitle: "Searched together; word-timed lyrics win, then the higher source in this list. Applies to the next song or Reload lyrics.";
+                        for s[i] in root.sources: HorizontalLayout {
+                            spacing: 8px;
+                            Text { text: (i + 1) + "."; width: 24px; vertical-alignment: center; color: Palette.foreground.with-alpha(0.6); }
+                            VerticalLayout {
+                                horizontal-stretch: 1; alignment: center;
+                                Text { text: s.name; font-size: 14px; }
+                                Text { text: s.note; font-size: 12px; color: Palette.foreground.with-alpha(0.6); }
+                            }
+                            Button { icon: @image-url("icons/up.svg"); colorize-icon: true; width: 36px; enabled: i > 0; clicked => { root.move-source(i, i - 1); } }
+                            Button { icon: @image-url("icons/down.svg"); colorize-icon: true; width: 36px; enabled: i < root.sources.length - 1; clicked => { root.move-source(i, i + 1); } }
+                            Switch { checked: s.enabled; toggled => { root.toggle-source(i, self.checked); } }
+                        }
+                    }
+                    Card {
+                        title: "Lyrics folder";
+                        subtitle: "Downloaded lyrics are cached here as .json. Put your own Artist - Title.lrc here to override; edit with any app.";
+                        Text { text: root.lyrics-dir; wrap: word-wrap; font-size: 12px; }
+                        HorizontalLayout {
+                            spacing: 8px; alignment: start;
+                            Button { text: "Change… (moves files)"; clicked => { root.browse-lyrics-dir(); } }
+                            Button { text: "Open"; clicked => { root.open-lyrics-dir(); } }
+                            Button { text: "Reset to default"; clicked => { root.reset-lyrics-dir(); } }
+                        }
+                    }
+                }
+
+                // ---------------- Taskbar ----------------
+                if root.page == 5: Card {
+                    title: "Taskbar lyrics";
+                    subtitle: "Current and next line drawn on the empty part of the taskbar";
+                    Row { label: "Show on taskbar"; Switch { checked <=> root.taskbar-lyrics; toggled => { root.changed(); } } }
+                    Row { label: "Side"; hint: "Right = next to the clock"; ComboBox { width: 160px; model: ["Right", "Left"]; current-value <=> root.taskbar-side; selected => { root.changed(); } } }
+                    Row { label: "Width"; ValueSlider { minimum: 150; maximum: 1200; decimals: 0; value <=> root.taskbar-width; edited => { root.changed(); } } }
+                }
+
+                // ---------------- Shortcuts ----------------
+                if root.page == 6: Card {
+                    title: "Global shortcuts";
+                    subtitle: "Type like Ctrl+Alt+L or Ctrl+Shift+F9, then press Enter. Empty = off.";
+                    Row { label: "Toggle click-through"; LineEdit { width: 180px; text <=> root.key-click-through; accepted => { root.changed(); root.rekey(); } } }
+                    Row { label: "Hold to grab"; hint: "Modifier keys only, e.g. Ctrl+Alt"; LineEdit { width: 180px; text <=> root.peek-keys; accepted => { root.changed(); } } }
+                    Row { label: "Hide / show"; LineEdit { width: 180px; text <=> root.key-hide; accepted => { root.changed(); root.rekey(); } } }
+                    Row { label: "Lyrics sooner +0.5s"; LineEdit { width: 180px; text <=> root.key-sooner; accepted => { root.changed(); root.rekey(); } } }
+                    Row { label: "Lyrics later −0.5s"; LineEdit { width: 180px; text <=> root.key-later; accepted => { root.changed(); root.rekey(); } } }
+                    Row { label: "Tap-sync"; hint: "Press when the singer starts the next line"; LineEdit { width: 180px; text <=> root.key-tap-sync; accepted => { root.changed(); root.rekey(); } } }
+                    Row { label: "Reset song offset"; LineEdit { width: 180px; text <=> root.key-reset-offset; accepted => { root.changed(); root.rekey(); } } }
+                    Row { label: "Centre horizontally"; LineEdit { width: 180px; text <=> root.key-centre; accepted => { root.changed(); root.rekey(); } } }
+                    Row { label: "Toggle taskbar lyrics"; LineEdit { width: 180px; text <=> root.key-taskbar; accepted => { root.changed(); root.rekey(); } } }
+                    if root.hotkey-errors != "": Text { text: root.hotkey-errors; color: #e57373; wrap: word-wrap; }
+                }
+
+                // ---------------- Updates & about ----------------
+                if root.page == 7: VerticalLayout {
+                    spacing: 14px;
+                    Card {
+                        title: "Updates";
+                        subtitle: "New versions come from GitHub Releases";
+                        Row {
+                            label: "When an update is found";
+                            ComboBox { width: 260px; model: ["Off", "Notify", "Download", "Auto"]; current-value <=> root.update-mode; selected => { root.changed(); } }
+                        }
+                        Text {
+                            font-size: 12px; color: Palette.foreground.with-alpha(0.6); wrap: word-wrap;
+                            text: "Notify: tray notification, click to install · Download: downloads quietly, installs when you exit · Auto: downloads and restarts into the new version";
+                        }
+                        Row { label: "Check now"; hint: root.update-status; Button { text: "Check for updates"; clicked => { root.check-updates(); } } }
+                        Row { label: "Start with Windows"; Switch { checked <=> root.autostart; toggled => { root.changed(); } } }
+                    }
+                    Card {
+                        title: "About FloatLyrics " + root.version;
+                        subtitle: "Open source (MIT).";
+                        Text {
+                            wrap: word-wrap; font-size: 13px;
+                            text: "Inspired by MiniLyrics, the classic floating-lyrics plugin for Winamp.\nLyrics engine ported from Lyricify Lyrics Helper by WXRIW (Apache-2.0).\nLyrics from LRCLIB, QQ Music, NetEase Cloud Music, Kugou and others. Translation by Google Translate.\nBuilt with Rust, Slint and Velopack.";
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component TrayMenu inherits Window {
+    title: "FloatLyrics Menu";
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+    in property <[MenuItem]> items;   // text "" = separator
+    in property <string> header;
+    callback chosen(int);
+    width: 300px;
+
+    Rectangle {
+        background: Palette.background;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: Palette.border;
+        drop-shadow-blur: 0px;
+        VerticalLayout {
+            padding: 6px;
+            if root.header != "": Text { text: root.header; font-size: 12px; color: Palette.foreground.with-alpha(0.6); overflow: elide; height: 26px; vertical-alignment: center; x: 10px; }
+            for it[i] in root.items: Rectangle {
+                height: it.text == "" ? 9px : 32px;
+                border-radius: 4px;
+                background: it.text != "" && ta.has-hover ? Palette.foreground.with-alpha(0.08) : transparent;
+                if it.text == "": Rectangle { height: 1px; width: parent.width - 16px; background: Palette.border; }
+                if it.checked: Image { x: 10px; width: 16px; height: 16px; source: @image-url("icons/check.svg"); colorize: Palette.accent-background; }
+                if it.arrow == 2: Image { x: 10px; width: 16px; height: 16px; source: @image-url("icons/left.svg"); colorize: Palette.foreground; }
+                if it.text != "": Text { x: 34px; text: it.text; font-size: 13px; vertical-alignment: center; height: parent.height; }
+                if it.arrow == 1: Image { x: parent.width - 26px; width: 16px; height: 16px; source: @image-url("icons/right.svg"); colorize: Palette.foreground; }
+                ta := TouchArea { enabled: it.text != ""; clicked => { root.chosen(i); } }
+            }
+        }
+    }
+}
+
+export component SearchPrompt inherits Window {
+    title: "Search lyrics";
+    always-on-top: true;
+    in-out property <string> query;
+    in property <string> message;
+    callback search(string);
+    preferred-width: 480px;
+    VerticalLayout {
+        padding: 16px; spacing: 10px;
+        Text { text: "Artist and/or title"; font-size: 14px; }
+        q := LineEdit { text <=> root.query; accepted => { root.search(self.text); } }
+        HorizontalLayout {
+            alignment: space-between;
+            Text { text: root.message; vertical-alignment: center; color: Palette.foreground.with-alpha(0.7); }
+            Button { text: "Search"; primary: true; clicked => { root.search(q.text); } }
+        }
+    }
+}
+
+export component GoogleFontsWindow inherits Window {
+    title: "Google Fonts";
+    icon: @image-url("icon.png");
+    preferred-width: 640px;
+    preferred-height: 720px;
+    callback gf-filter();
+    callback gf-select(string);
+    callback gf-use(string);
+    callback gf-sample-changed();
+    in property <[GfRow]> gf-rows;
+    in-out property <string> gf-search;
+    in-out property <string> gf-category: "All";
+    in-out property <string> gf-sample: "Sing along with every word";
+    in property <string> gf-selected;
+    in property <image> gf-preview;
+    in property <string> gf-status;
+    VerticalLayout {
+        padding: 16px;
+        spacing: 14px;
+        Card {
+            title: "Browse Google Fonts";
+            subtitle: "1,800+ free fonts. Names are shown in their own font; click one to preview it with your lyric colours.";
+            HorizontalLayout {
+                spacing: 8px;
+                LineEdit { horizontal-stretch: 1; placeholder-text: "Search fonts…"; text <=> root.gf-search; edited => { root.gf-filter(); } }
+                ComboBox { width: 170px; model: ["All", "Sans Serif", "Serif", "Display", "Handwriting", "Monospace"]; current-value <=> root.gf-category; selected => { root.gf-filter(); } }
+            }
+            if root.gf-status != "": Text { text: root.gf-status; font-size: 12px; color: Palette.foreground.with-alpha(0.65); }
+            Rectangle {
+                height: 380px;
+                border-radius: 6px; border-width: 1px; border-color: Palette.border;
+                ListView {
+                    for r in root.gf-rows: Rectangle {
+                        height: 46px;
+                        background: r.name == root.gf-selected ? Palette.foreground.with-alpha(0.10) : ta.has-hover ? Palette.foreground.with-alpha(0.05) : transparent;
+                        HorizontalLayout {
+                            padding-left: 12px; padding-right: 12px; spacing: 10px;
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                if r.preview.width > 0: Image { source: r.preview; height: min(30px, parent.height); image-fit: contain; x: 0; }
+                                if r.preview.width == 0: Text { text: r.name; font-size: 16px; vertical-alignment: center; x: 0; height: parent.height; }
+                            }
+                            Text { text: r.installed ? "✓ added  ·  " + r.category : r.category; font-size: 12px; vertical-alignment: center; color: Palette.foreground.with-alpha(0.55); }
+                        }
+                        ta := TouchArea { clicked => { root.gf-select(r.name); } }
+                    }
+                }
+            }
+        }
+        Card {
+            title: root.gf-selected == "" ? "Preview" : root.gf-selected;
+            HorizontalLayout { spacing: 8px; Text { text: "Preview text"; vertical-alignment: center; } LineEdit { horizontal-stretch: 1; text <=> root.gf-sample; accepted => { root.gf-sample-changed(); } } }
+            Rectangle {
+                height: 110px; border-radius: 6px; background: #1b1b1f; clip: true;
+                if root.gf-selected == "": Text { text: "Pick a font above"; color: #ffffff80; }
+                Image { source: root.gf-preview; image-fit: contain; width: min(self.source.width * 1px, parent.width - 16px); height: min(self.source.height * 1px, parent.height - 8px); }
+            }
+            HorizontalLayout {
+                alignment: end;
+                Button { text: "Use this font"; primary: true; enabled: root.gf-selected != ""; clicked => { root.gf-use(root.gf-selected); } }
+            }
+        }
+    }
+}
