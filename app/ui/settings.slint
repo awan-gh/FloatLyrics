@@ -439,21 +439,49 @@ export component TrayMenu inherits Window {
     }
 }
 
+export struct SearchHit { title: string, detail: string, preview: string }
+
 export component SearchPrompt inherits Window {
     title: "Search lyrics";
+    icon: @image-url("icon.png");
     always-on-top: true;
+    preferred-width: 620px;
+    preferred-height: 560px;
     in-out property <string> query;
     in property <string> message;
+    in property <[SearchHit]> hits;
+    in property <int> applied: -1;
     callback search(string);
-    preferred-width: 480px;
+    callback pick(int);
     VerticalLayout {
         padding: 16px; spacing: 10px;
-        Text { text: "Artist and/or title"; font-size: 14px; }
-        q := LineEdit { text <=> root.query; accepted => { root.search(self.text); } }
+        Text { text: "Artist and/or title — every enabled source is searched; pick the version you want."; font-size: 13px; wrap: word-wrap; }
         HorizontalLayout {
-            alignment: space-between;
-            Text { text: root.message; vertical-alignment: center; color: Palette.foreground.with-alpha(0.7); }
+            spacing: 8px;
+            q := LineEdit { horizontal-stretch: 1; text <=> root.query; accepted => { root.search(self.text); } }
             Button { text: "Search"; primary: true; clicked => { root.search(q.text); } }
+        }
+        Text { text: root.message; font-size: 12px; color: Palette.foreground.with-alpha(0.65); }
+        Rectangle {
+            vertical-stretch: 1;
+            border-radius: 6px; border-width: 1px; border-color: Palette.border;
+            ListView {
+                for h[i] in root.hits: Rectangle {
+                    height: 78px;
+                    background: i == root.applied ? Palette.accent-background.with-alpha(0.18) : ta.has-hover ? Palette.foreground.with-alpha(0.06) : transparent;
+                    HorizontalLayout {
+                        padding: 10px; spacing: 10px;
+                        VerticalLayout {
+                            horizontal-stretch: 1; spacing: 2px;
+                            Text { text: h.title; font-size: 14px; font-weight: 600; overflow: elide; }
+                            Text { text: h.detail; font-size: 12px; color: Palette.accent-background; }
+                            Text { text: h.preview; font-size: 12px; color: Palette.foreground.with-alpha(0.6); overflow: elide; }
+                        }
+                        Button { text: i == root.applied ? "In use" : "Use"; enabled: i != root.applied; y: (parent.height - self.height) / 2; clicked => { root.pick(i); } }
+                    }
+                    ta := TouchArea { double-clicked => { root.pick(i); } }
+                }
+            }
         }
     }
 }

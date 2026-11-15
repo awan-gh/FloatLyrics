@@ -77,6 +77,8 @@ pub struct Renderer {
     memdc: HDC,
     dib: HBITMAP,
     size: (i32, i32),
+    /// text layouts from recent frames, reused while text/style/width stay the same (drawing runs at the display rate)
+    cache: std::collections::HashMap<String, (IDWriteTextLayout, f32)>,
 }
 
 fn wide(s: &str) -> Vec<u16> { s.encode_utf16().collect() }
@@ -99,13 +101,14 @@ impl Renderer {
             let rt = d2d.CreateDCRenderTarget(&props)?;
             rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE); // ClearType needs an opaque target
             let memdc = CreateCompatibleDC(None);
-            Ok(Self { d2d, dw, custom: None, rt, memdc, dib: HBITMAP::default(), size: (0, 0) })
+            Ok(Self { d2d, dw, custom: None, rt, memdc, dib: HBITMAP::default(), size: (0, 0), cache: Default::default() })
         }
     }
 
     /// Load every font file in `dir` (no install needed). Returns family names found there.
     pub fn load_fonts(&mut self, dir: &std::path::Path) -> Vec<String> {
         self.custom = None;
+        self.cache.clear();
         let files: Vec<_> = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path())
             .filter(|p| matches!(p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(), Some("ttf" | "otf" | "ttc")))
             .collect();
@@ -159,15 +162,24 @@ impl Renderer {
         }
     }
 
+    fn cached(&mut self, st: &Style, text: &str, size: f32, align: DWRITE_TEXT_ALIGNMENT, width: f32) -> Result<(IDWriteTextLayout, f32)> {
+        let key = format!("{text}\x01{size}\x01{}\x01{}\x01{}{}\x01{width}", align.0, st.family, st.bold as u8, st.italic as u8);
+        if let Some(v) = self.cache.get(&key) { return Ok(v.clone()); }
+        let v = self.layout(text, &self.format(st, size, align)?, width)?;
+        self.cache.insert(key, v.clone());
+        Ok(v)
+    }
+
     /// Lay out rows, size the window to fit, draw, push to screen. Returns the window height in px.
     pub fn draw(&mut self, hwnd: HWND, width: i32, rows: &[Row], st: &Style, fixed_height: Option<i32>) -> Result<i32> {
         let pad = st.padding + st.outline;
         let inner = width as f32 - 2.0 * pad;
         let mut laid = Vec::with_capacity(rows.len());
         let mut y = pad;
+        if self.cache.len() > 200 { self.cache.clear(); }
         for r in rows {
-            let (main, mh) = self.layout(r.text, &self.format(st, r.size, r.align)?, inner)?;
-            let sub = if r.sub.is_empty() { None } else { Some(self.layout(r.sub, &self.format(st, r.size * r.sub_scale, r.align)?, inner)?) };
+            let (main, mh) = self.cached(st, r.text, r.size, r.align, inner)?;
+            let sub = if r.sub.is_empty() { None } else { Some(self.cached(st, r.sub, r.size * r.sub_scale, r.align, inner)?) };
             let top = y;
             y += mh + sub.as_ref().map(|s| s.1).unwrap_or(0.0);
             laid.push((top, mh, main, sub));

@@ -12,6 +12,19 @@ use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 pub const WM_TRAY: u32 = WM_APP + 1;
+pub const WM_FRAME: u32 = WM_APP + 2;
+
+/// Wake the UI once per display refresh (DwmFlush waits for vblank), so drawing matches 60/144/180 Hz screens.
+pub fn start_frame_clock(hwnd: HWND) {
+    let h = hwnd.0 as isize;
+    std::thread::spawn(move || loop {
+        if unsafe { windows::Win32::Graphics::Dwm::DwmFlush() }.is_err() { std::thread::sleep(std::time::Duration::from_millis(16)); }
+        // one frame in flight at most: skip if the UI hasn't handled the last one
+        if !crate::FRAME_PENDING.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            unsafe { let _ = PostMessageW(Some(HWND(h as _)), WM_FRAME, WPARAM(0), LPARAM(0)); }
+        }
+    });
+}
 const TRAY_ID: u32 = 1;
 
 pub fn single_instance() -> bool {
@@ -71,12 +84,41 @@ fn move_px(h: HWND, x: i32, y: i32) {
     unsafe { let _ = SetWindowPos(h, None, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE); }
 }
 
-pub fn save_pos(a: &mut App) { let r = rect(a.hwnd); a.s.left = r.left; a.s.top = r.top; crate::mark_dirty(a); }
+fn monitors() -> Vec<HMONITOR> {
+    let mut mons: Vec<HMONITOR> = vec![];
+    unsafe extern "system" fn cb(m: HMONITOR, _: HDC, _: *mut RECT, l: LPARAM) -> BOOL {
+        (*(l.0 as *mut Vec<HMONITOR>)).push(m);
+        TRUE
+    }
+    unsafe { let _ = EnumDisplayMonitors(None, None, Some(cb), LPARAM(&mut mons as *mut _ as isize)); }
+    mons
+}
 
+/// Identifies the current monitor arrangement, e.g. "1920x1080@0,0;2560x1440@1920,-180".
+pub fn layout_key() -> String {
+    let mut v: Vec<String> = monitors().into_iter().map(|m| {
+        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        unsafe { let _ = GetMonitorInfoW(m, &mut mi); }
+        let r = mi.rcMonitor;
+        format!("{}x{}@{},{}", r.right - r.left, r.bottom - r.top, r.left, r.top)
+    }).collect();
+    v.sort();
+    v.join(";")
+}
+
+pub fn save_pos(a: &mut App) {
+    let r = rect(a.hwnd);
+    a.s.left = r.left; a.s.top = r.top;
+    a.s.positions.insert(layout_key(), (r.left, r.top));
+    crate::mark_dirty(a);
+}
+
+/// Position for this monitor arrangement if we've seen it before; otherwise keep the last spot if it's
+/// still on a screen, else bottom-centre of the primary monitor. Runs at start and on display changes.
 pub fn restore_pos(a: &mut App) {
-    let p = POINT { x: a.s.left + 20, y: a.s.top + 10 };
-    let on_screen = unsafe { !MonitorFromPoint(p, MONITOR_DEFAULTTONULL).is_invalid() };
-    if a.s.left != -1 && on_screen { move_px(a.hwnd, a.s.left, a.s.top); }
+    let (x, y) = a.s.positions.get(&layout_key()).copied().unwrap_or((a.s.left, a.s.top));
+    let on_screen = unsafe { !MonitorFromPoint(POINT { x: x + 20, y: y + 10 }, MONITOR_DEFAULTTONULL).is_invalid() };
+    if x != -1 && on_screen { move_px(a.hwnd, x, y); }
     else { move_to(a, 0.5, 0.85, Some(unsafe { MonitorFromPoint(POINT::default(), MONITOR_DEFAULTTOPRIMARY) })); }
 }
 
@@ -95,12 +137,7 @@ pub fn move_to(a: &mut App, fx: f64, fy: f64, mon: Option<HMONITOR>) {
 }
 
 pub fn next_monitor(a: &mut App) {
-    let mut mons: Vec<HMONITOR> = vec![];
-    unsafe extern "system" fn cb(m: HMONITOR, _: HDC, _: *mut RECT, l: LPARAM) -> BOOL {
-        (*(l.0 as *mut Vec<HMONITOR>)).push(m);
-        TRUE
-    }
-    unsafe { let _ = EnumDisplayMonitors(None, None, Some(cb), LPARAM(&mut mons as *mut _ as isize)); }
+    let mons = monitors();
     if mons.len() < 2 { return; }
     let here = unsafe { MonitorFromWindow(a.hwnd, MONITOR_DEFAULTTONEAREST) };
     let i = mons.iter().position(|m| *m == here).unwrap_or(0);
@@ -130,9 +167,13 @@ pub fn place_taskbar(tb_hwnd: HWND, taskbar_width: f64, side: &str) {
 pub fn taskbar_size(a: &App) -> (i32, i32) { let r = rect(a.tb_hwnd); (r.right - r.left, r.bottom - r.top) }
 
 // ---------- tray ----------
+/// The exe's own icon (resource 1), at the small-icon size for the current DPI.
 fn icon() -> HICON {
-    static PNG: &[u8] = include_bytes!("../ui/icon.png");
-    unsafe { CreateIconFromResourceEx(PNG, true, 0x00030000, 32, 32, LR_DEFAULTCOLOR).unwrap_or_default() }
+    unsafe {
+        let inst = GetModuleHandleW(None).unwrap_or_default();
+        LoadImageW(Some(inst.into()), PCWSTR(1 as _), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR)
+            .map(|h| HICON(h.0)).unwrap_or_default()
+    }
 }
 
 fn tray_data(h: HWND) -> NOTIFYICONDATAW {
@@ -208,6 +249,8 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         WM_NCLBUTTONDBLCLK if is_main => { with_app(|a| move_to(a, 0.5, f64::NAN, None)); return LRESULT(0); }
         WM_NCRBUTTONUP if is_main => { crate::ui::show_menu(); return LRESULT(0); }
         WM_EXITSIZEMOVE if is_main => { with_app(save_pos); }
+        WM_FRAME => { crate::FRAME_PENDING.store(false, std::sync::atomic::Ordering::Release); crate::frame(); return LRESULT(0); }
+        WM_DISPLAYCHANGE if is_main => { with_app(restore_pos); }
         WM_HOTKEY => { crate::keys::on_hotkey(wp.0 as i32); return LRESULT(0); }
         WM_TRAY => {
             match (lp.0 as u32) & 0xFFFF {

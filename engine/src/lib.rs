@@ -90,6 +90,11 @@ pub fn search(src: SourceId, artist: &str, title: &str, t: &Track) -> Result<Opt
 }
 
 /// Free-text manual search on one source (used by "Search lyrics manually").
+/// Up to `max` candidates from one source for a free-text query, best first.
+pub fn search_query_many(src: SourceId, query: &str, duration: f64, max: usize) -> Result<Vec<Lyric>, Error> {
+    sources::search_query_many(src, query, duration, max)
+}
+
 pub fn search_query(src: SourceId, query: &str, duration: f64) -> Result<Option<Lyric>, Error> {
     sources::search_query(src, query, duration)
 }

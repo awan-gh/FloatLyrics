@@ -31,6 +31,7 @@ pub enum Msg {
     GfCatalog(Result<Vec<gfonts::Family>, String>),
     GfPreview { gen: u64, name: String, path: std::path::PathBuf, big: bool },
     GfInstalled(Result<String, String>),
+    SearchHits { gen: u64, found: Vec<Lyric> },
 }
 
 pub struct App {
@@ -58,6 +59,9 @@ pub struct App {
     pub menu: Option<TrayMenu>,
     pub menu_page: u8,
     pub prompt: Option<SearchPrompt>,
+    pub hits: Vec<Lyric>,
+    pub search_gen: u64,
+    pub search_done: usize,
     pub fonts: Vec<String>,
     pub gf: Vec<gfonts::Family>,
     pub gf_gen: u64,
@@ -68,6 +72,7 @@ pub struct App {
     pub update_status: String,
     started: Instant,
     last_place: Instant,
+    last_frame: Instant,
 }
 
 thread_local! { pub static APP: RefCell<Option<App>> = const { RefCell::new(None) }; }
@@ -100,9 +105,10 @@ fn main() {
     let app = App {
         s, r, tb_r, hwnd, tb_hwnd, now, track: None, lyric: None, song_key: String::new(), status: String::new(),
         song_offset: 0.0, tx, rx, manual_hidden: false, peek: false, applied_ct: None, anim: None, anim_index: -2,
-        anim_key: String::new(), dirty: None, settings_win: None, menu: None, menu_page: 0, prompt: None, fonts, gf: vec![], gf_gen: 0, gf_model: None, gf_win: None,
+        anim_key: String::new(), dirty: None, settings_win: None, menu: None, menu_page: 0, prompt: None, hits: vec![], search_gen: 0, search_done: 0, fonts, gf: vec![], gf_gen: 0, gf_model: None, gf_win: None,
         hotkey_errors: String::new(), pending_update: None, update_status: String::new(), started: Instant::now(),
         last_place: Instant::now() - Duration::from_secs(5),
+        last_frame: Instant::now(),
     };
     APP.with(|a| *a.borrow_mut() = Some(app));
     with_app(|a| {
@@ -117,8 +123,7 @@ fn main() {
 
     // startup touches lots of one-off pages (font lists, D2D init); give them back once settled
     slint::Timer::single_shot(Duration::from_secs(5), win::trim_memory);
-    let timer = slint::Timer::default();
-    timer.start(slint::TimerMode::Repeated, Duration::from_millis(33), || { with_app(tick); });
+    win::start_frame_clock(hwnd);
     slint::run_event_loop_until_quit().ok();
     with_app(|a| { a.s.save(); win::tray_remove(a.hwnd); });
 }
@@ -131,6 +136,16 @@ fn media_thread(now: Arc<Mutex<media::NowPlaying>>) {
             if m.poll().is_ok() { *now.lock().unwrap() = m.state.clone(); }
             std::thread::sleep(Duration::from_millis(500));
         }
+    });
+}
+
+pub static FRAME_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Called every display refresh. Redraws at full rate only while something moves; otherwise ~10 fps.
+pub fn frame() {
+    with_app(|a| {
+        let busy = a.anim.is_some() || a.s.fill_style == "Rainbow" || (a.lyric.is_some() && a.s.karaoke && a.now.lock().unwrap().playing);
+        if busy || a.last_frame.elapsed() >= Duration::from_millis(100) { a.last_frame = Instant::now(); tick(a); }
     });
 }
 
@@ -242,6 +257,7 @@ fn tick(a: &mut App) {
             Msg::GfCatalog(r) => ui::gf_on_catalog(a, r),
             Msg::GfPreview { gen, name, path, big } => ui::gf_on_preview(a, gen, name, path, big),
             Msg::GfInstalled(r) => ui::gf_on_installed(a, r),
+            Msg::SearchHits { gen, found } => ui::on_search_hits(a, gen, found),
         }
     }
     // song change

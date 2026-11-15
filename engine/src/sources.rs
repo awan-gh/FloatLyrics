@@ -58,6 +58,15 @@ pub fn search_query(src: SourceId, query: &str, duration: f64) -> Result<Option<
     }
 }
 
+/// Free-text search returning up to `max` candidates from one source (for "pick from a list").
+pub fn search_query_many(src: SourceId, query: &str, duration: f64, max: usize) -> Result<Vec<Lyric>, Error> {
+    match src {
+        SourceId::Lrclib => lrclib_ranked(&[("q", query)], duration, query, max),
+        SourceId::LyricsOvh => Ok(ovh_query(query, duration)?.into_iter().collect()),
+        _ => Ok(searcher(src, query)?.iter().take(max).filter_map(|h| lyrics(src, h, duration).ok().flatten()).collect()),
+    }
+}
+
 fn searcher(src: SourceId, kw: &str) -> Result<Vec<Hit>, Error> {
     match src {
         SourceId::QQMusic => qq_search(kw),
@@ -369,9 +378,14 @@ pub fn lrclib_query(q: &str, duration: f64, hay: &str) -> Result<Option<Lyric>, 
 
 /// One LRCLIB search; keeps only results whose track name appears in `hay` (guards against junk matches).
 fn lrclib(params: &[(&str, &str)], duration: f64, hay: &str) -> Result<Option<Lyric>, Error> {
+    Ok(lrclib_ranked(params, duration, hay, 1)?.into_iter().next())
+}
+
+/// Up to `max` LRCLIB results, best first (synced before plain, then closest duration).
+fn lrclib_ranked(params: &[(&str, &str)], duration: f64, hay: &str, max: usize) -> Result<Vec<Lyric>, Error> {
     let v = read_json(agent().get("https://lrclib.net/api/search").set("User-Agent", "FloatLyrics/1.0").query_pairs(params.iter().copied()).call()?)?;
     let hay = norm(hay);
-    let mut best: Option<(f64, &Value)> = None;
+    let mut ranked: Vec<(f64, &Value)> = vec![];
     for r in v.as_array().into_iter().flatten() {
         let name = norm(r["trackName"].as_str().unwrap_or(""));
         if name.is_empty() || !(hay.contains(&name) || name.contains(&hay)) { continue; }
@@ -380,17 +394,19 @@ fn lrclib(params: &[(&str, &str)], duration: f64, hay: &str) -> Result<Option<Ly
         if !synced && r["plainLyrics"].as_str().unwrap_or("").is_empty() && !instr { continue; }
         let d = r["duration"].as_f64().unwrap_or(0.0);
         let score = if synced || instr { 0.0 } else { 1000.0 } + if duration > 0.0 && d > 0.0 { (d - duration).abs() } else { 50.0 };
-        if best.map_or(true, |(b, _)| score < b) { best = Some((score, r)); }
+        ranked.push((score, r));
     }
-    let Some((_, b)) = best else { return Ok(None) };
-    let text = [b["syncedLyrics"].as_str(), b["plainLyrics"].as_str()]
-        .into_iter()
-        .flatten()
-        .find(|x| !x.is_empty())
-        .unwrap_or("[00:00.00]♪ instrumental ♪");
-    let mut l = parse_lrc(text, duration);
-    l.source = format!("lrclib: {} - {}", s(&b["artistName"]), s(&b["trackName"]));
-    Ok(Some(l))
+    ranked.sort_by(|a, b| a.0.total_cmp(&b.0));
+    Ok(ranked.into_iter().take(max).map(|(_, b)| {
+        let text = [b["syncedLyrics"].as_str(), b["plainLyrics"].as_str()]
+            .into_iter()
+            .flatten()
+            .find(|x| !x.is_empty())
+            .unwrap_or("[00:00.00]♪ instrumental ♪");
+        let mut l = parse_lrc(text, duration);
+        l.source = format!("lrclib: {} - {}", s(&b["artistName"]), s(&b["trackName"]));
+        l
+    }).collect())
 }
 
 // ---------------- lyrics.ovh (plain lyrics, free, no key) ----------------

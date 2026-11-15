@@ -47,6 +47,8 @@ pub struct Settings {
     pub hide_when_no_lyrics: bool,
     pub global_offset: f64,
     pub left: i32,
+    /// overlay position per monitor arrangement (key = all monitor rectangles)
+    pub positions: HashMap<String, (i32, i32)>,
     pub top: i32,
     // translation
     pub translation_lang: String,
@@ -88,7 +90,7 @@ impl Default for Settings {
             bg_opacity: 0.6, bg_mode: "None".into(), opacity: 1.0, fill_style: "Solid".into(),
             lines_before: 0, lines_after: 1, next_scale: 0.65, align: "Center".into(), width: 1100.0,
             anim_style: "Slide".into(), anim_ms: 350.0, click_through: false, show_frame: true, hide_when_idle: true, hide_when_no_lyrics: false,
-            global_offset: 0.0, left: -1, top: -1,
+            global_offset: 0.0, positions: HashMap::new(), left: -1, top: -1,
             translation_lang: String::new(), show_romaji: false, romaji_main: false, sub_all_lines: false, sub_scale: 0.5,
             source_order: SourceId::all().to_vec(), source_disabled: vec![SourceId::SodaMusic], lyrics_dir: String::new(), // Soda search is unreliable lyrics_dir: String::new(),
             taskbar_lyrics: false, taskbar_width: 420.0, taskbar_side: "Right".into(),
@@ -148,6 +150,7 @@ mod tests {
                 serde_json::Value::Number(_) => serde_json::json!(7),
                 serde_json::Value::String(_) => serde_json::Value::String(format!("x{k}")),
                 serde_json::Value::Array(_) => serde_json::json!(["Kugou"]),
+                serde_json::Value::Object(_) if k == "positions" => serde_json::json!({"1920x1080@0,0": [5, 6]}),
                 serde_json::Value::Object(_) => serde_json::json!({"song": 1.5}),
                 other => other.clone(),
             };

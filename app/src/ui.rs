@@ -1,6 +1,6 @@
 //! Slint windows: settings, tray menu, manual search prompt.
 use crate::settings::Settings;
-use crate::{with_app, App, MenuItem, Msg, SearchPrompt, SettingsWindow, SourceItem, TrayMenu};
+use crate::{with_app, App, MenuItem, Msg, SearchHit, SearchPrompt, SettingsWindow, SourceItem, TrayMenu};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, StandardListViewItem, VecModel};
 use std::time::Instant;
 use windows::core::w;
@@ -311,32 +311,65 @@ fn menu_chosen(i: i32) {
 }
 
 // ---------------- manual search ----------------
+fn rank(l: &engine::Lyric) -> u8 { if l.lines.iter().any(|x| x.syls.is_some()) { 3 } else if l.synced { 2 } else { 1 } }
+
+fn hit_row(l: &engine::Lyric) -> SearchHit {
+    let kind = match rank(l) { 3 => "Word-synced", 2 => "Line-synced", _ => "Plain text (timing estimated)" };
+    let preview: Vec<&str> = l.lines.iter().map(|x| x.text.trim()).filter(|t| !t.is_empty()).take(2).collect();
+    SearchHit { title: l.source.as_str().into(), detail: format!("{kind} · {} lines", l.lines.len()).into(), preview: preview.join("  /  ").into() }
+}
+
 fn open_prompt() {
+    if let Some(Some(w)) = with_app(|a| a.prompt.as_ref().map(|w| w.as_weak())) { if let Some(w) = w.upgrade() { let _ = w.show(); return; } }
     let p = SearchPrompt::new().unwrap();
     let q = with_app(|a| a.track.as_ref().map(|t| format!("{} {}", engine::clean_artist(&t.artist), engine::clean_title(&t.title))).unwrap_or_default()).unwrap_or_default();
-    p.set_query(q.into());
-    let wk = p.as_weak();
-    p.on_search(move |q| {
-        let Some(w) = wk.upgrade() else { return };
-        w.set_message("Searching…".into());
-        let Some((tx, key, track, order, dir)) = with_app(|a| (a.tx.clone(), a.song_key.clone(), a.track.clone(), a.s.sources(), a.s.lyrics_dir())) else { return };
-        let wk2 = wk.clone();
-        let q = q.to_string();
-        std::thread::spawn(move || {
-            let dur = track.as_ref().map(|t| t.duration).unwrap_or(0.0);
-            let found = order.iter().find_map(|s| engine::search_query(*s, &q, dur).ok().flatten());
-            let msg = match &found { Some(l) => format!("Found: {}", l.source), None => "Nothing found".into() };
-            if let (Some(l), Some(t)) = (&found, &track) {
-                let name: String = format!("{} - {}", t.artist, t.title).chars().map(|c| if "<>:\"/\\|?*".contains(c) { '_' } else { c }).take(150).collect();
-                let _ = std::fs::create_dir_all(&dir);
-                let _ = std::fs::write(dir.join(format!("{name}.json")), serde_json::to_string(l).unwrap_or_default());
-            }
-            if let Some(l) = found { let status = format!("manual · {}", l.source); let _ = tx.send(Msg::Lyric { key, lyric: Some(l), status }); }
-            let _ = slint::invoke_from_event_loop(move || { if let Some(w) = wk2.upgrade() { w.set_message(msg.into()); } });
-        });
-    });
+    p.set_query(q.clone().into());
+    p.on_search(|q| { with_app(|a| start_search(a, q.to_string())); });
+    p.on_pick(|i| { with_app(|a| pick_hit(a, i as usize)); });
+    p.window().on_close_requested(|| { with_app(|a| { a.prompt = None; a.hits.clear(); }); slint::CloseRequestResponse::HideWindow });
     let _ = p.show();
-    with_app(|a| a.prompt = Some(p));
+    with_app(|a| { a.prompt = Some(p); if !q.trim().is_empty() { start_search(a, q); } });
+}
+
+/// Search every enabled source in parallel; results stream in as each source answers.
+fn start_search(a: &mut App, q: String) {
+    a.hits.clear();
+    a.search_done = 0;
+    a.search_gen += 1;
+    let (gen, order, dur) = (a.search_gen, a.s.sources(), a.track.as_ref().map(|t| t.duration).unwrap_or(0.0));
+    if let Some(p) = &a.prompt { p.set_hits(ModelRc::new(VecModel::from(Vec::<SearchHit>::new()))); p.set_applied(-1); p.set_message(format!("Searching {} sources…", order.len()).into()); }
+    for src in order {
+        let (tx, q) = (a.tx.clone(), q.clone());
+        std::thread::spawn(move || {
+            let found = engine::search_query_many(src, &q, dur, 4).unwrap_or_default();
+            let _ = tx.send(Msg::SearchHits { gen, found });
+        });
+    }
+}
+
+pub fn on_search_hits(a: &mut App, gen: u64, found: Vec<engine::Lyric>) {
+    if gen != a.search_gen { return; }
+    a.search_done += 1;
+    a.hits.extend(found);
+    a.hits.sort_by_key(|l| std::cmp::Reverse(rank(l))); // stable: keeps source priority within a rank
+    let Some(p) = &a.prompt else { return };
+    p.set_hits(ModelRc::new(VecModel::from(a.hits.iter().map(hit_row).collect::<Vec<_>>())));
+    p.set_message(format!("{} result(s){}", a.hits.len(), if a.search_done < a.s.sources().len() { " — still searching…" } else { "" }).into());
+}
+
+fn pick_hit(a: &mut App, i: usize) {
+    let Some(l) = a.hits.get(i).cloned() else { return };
+    if let Some(t) = &a.track {
+        let dir = a.s.lyrics_dir();
+        let name: String = format!("{} - {}", t.artist, t.title).chars().map(|c| if r#"<>:"/\|?*"#.contains(c) { '_' } else { c }).take(150).collect();
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(dir.join(format!("{name}.json")), serde_json::to_string(&l).unwrap_or_default());
+    }
+    a.status = format!("manual · {}", l.source);
+    a.lyric = Some(l);
+    crate::retranslate(a);
+    crate::win::tray_tip(a);
+    if let Some(p) = &a.prompt { p.set_applied(i as i32); }
 }
 
 // ---------------- Google Fonts browser ----------------
