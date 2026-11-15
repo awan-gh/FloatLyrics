@@ -223,6 +223,8 @@ pub fn apply_autostart(on: bool) {
         if RegOpenKeyExW(HKEY_CURRENT_USER, w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run"), Some(0), KEY_SET_VALUE, &mut key).is_err() { return; }
         if on {
             let exe = std::env::current_exe().unwrap_or_default();
+            // dev builds (cargo target folder) must not hijack the installed app's autostart entry
+            if exe.components().any(|c| c.as_os_str() == "target") { let _ = RegCloseKey(key); return; }
             let v: Vec<u16> = format!("\"{}\"", exe.display()).encode_utf16().chain(Some(0)).collect();
             let bytes = std::slice::from_raw_parts(v.as_ptr() as *const u8, v.len() * 2);
             let _ = RegSetValueExW(key, w!("FloatLyrics"), Some(0), REG_SZ, Some(bytes));
