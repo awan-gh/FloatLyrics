@@ -256,7 +256,8 @@ fn refresh_menu(a: &App) {
     let Some(m) = &a.menu else { return };
     let items: Vec<MenuItem> = if a.menu_page == 0 {
         MAIN.iter().map(|s| MenuItem {
-            text: (*s).into(),
+            // MAIN keeps the stable key that menu_chosen matches; only the shown text follows the state
+            text: match *s { "Hide / show" if a.manual_hidden => "Show lyrics", "Hide / show" => "Hide lyrics", s => s }.into(),
             checked: match *s { "Click-through" => a.s.click_through, "Taskbar lyrics" => a.s.taskbar_lyrics, _ => false },
             arrow: if *s == "Position" { 1 } else { 0 },
         }).collect()

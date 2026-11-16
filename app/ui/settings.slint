@@ -364,7 +364,7 @@ export component SettingsWindow inherits Window {
                     subtitle: "Type like Ctrl+Alt+L or Ctrl+Shift+F9, then press Enter. Empty = off.";
                     Row { label: "Toggle click-through"; LineEdit { width: 180px; text <=> root.key-click-through; accepted => { root.changed(); root.rekey(); } } }
                     Row { label: "Hold to grab"; hint: "Modifier keys only, e.g. Ctrl+Alt"; LineEdit { width: 180px; text <=> root.peek-keys; accepted => { root.changed(); } } }
-                    Row { label: "Hide / show"; LineEdit { width: 180px; text <=> root.key-hide; accepted => { root.changed(); root.rekey(); } } }
+                    Row { label: "Hide or show lyrics"; LineEdit { width: 180px; text <=> root.key-hide; accepted => { root.changed(); root.rekey(); } } }
                     Row { label: "Lyrics sooner +0.5s"; LineEdit { width: 180px; text <=> root.key-sooner; accepted => { root.changed(); root.rekey(); } } }
                     Row { label: "Lyrics later −0.5s"; LineEdit { width: 180px; text <=> root.key-later; accepted => { root.changed(); root.rekey(); } } }
                     Row { label: "Tap-sync"; hint: "Press when the singer starts the next line"; LineEdit { width: 180px; text <=> root.key-tap-sync; accepted => { root.changed(); root.rekey(); } } }
