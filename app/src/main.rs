@@ -87,6 +87,12 @@ pub fn with_app<R>(f: impl FnOnce(&mut App) -> R) -> Option<R> {
 
 fn main() {
     velopack::VelopackApp::build().run(); // handles install/update hooks, must run first
+    if std::env::args().any(|x| x == "--probe-media") {
+        win::attach_console();
+        win::com_init_mta();
+        if let Err(e) = media::probe() { println!("probe failed: {e}"); }
+        return;
+    }
     if std::env::args().any(|x| x == "--check-settings") {
         win::attach_console();
         let path = std::env::args().skip_while(|x| x != "--check-settings").nth(1);
@@ -147,8 +153,14 @@ fn media_thread(now: Arc<Mutex<media::NowPlaying>>) {
     std::thread::spawn(move || {
         win::com_init_mta();
         let mut m = media::Media::new();
+        let mut fails = 0;
         loop {
-            if m.poll().is_ok() { *now.lock().unwrap() = m.state.clone(); }
+            match m.poll() {
+                Ok(()) => { fails = 0; *now.lock().unwrap() = m.state.clone(); }
+                // the media manager/session can go stale (audio stack reset, player restart): reconnect
+                // instead of showing the last reading forever
+                Err(_) => { fails += 1; if fails >= 3 { m = media::Media::new(); fails = 0; } }
+            }
             std::thread::sleep(Duration::from_millis(500));
         }
     });
