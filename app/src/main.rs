@@ -105,6 +105,7 @@ fn main() {
         return;
     }
     if !win::single_instance() { return; }
+    update::install_pending_at_startup(); // relaunches into a downloaded-but-not-installed update
     win::init_process();
 
     let (tx, rx) = channel();
@@ -152,7 +153,7 @@ fn main() {
     slint::Timer::single_shot(Duration::from_secs(5), win::trim_memory);
     win::start_frame_clock(hwnd);
     slint::run_event_loop_until_quit().ok();
-    with_app(|a| { a.s.save(); win::tray_remove(a.hwnd); });
+    with_app(|a| { a.s.save(); win::tray_remove(a.hwnd); update::install_on_exit(a); });
 }
 
 fn media_thread(now: Arc<Mutex<media::NowPlaying>>) {

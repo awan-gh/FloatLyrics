@@ -28,6 +28,8 @@ impl NowPlaying {
 pub struct Media {
     mgr: Option<Manager>,
     last_raw: f64,
+    last_upd: f64,
+    last_key: String,
     pub state: NowPlaying,
 }
 
@@ -35,7 +37,7 @@ pub struct Media {
 fn ticks_to_unix_secs(ticks: i64) -> f64 { ticks as f64 / 1e7 - 11_644_473_600.0 }
 
 impl Media {
-    pub fn new() -> Self { Self { mgr: None, last_raw: f64::NAN, state: NowPlaying::default() } }
+    pub fn new() -> Self { Self { mgr: None, last_raw: f64::NAN, last_upd: f64::NAN, last_key: String::new(), state: NowPlaying::default() } }
 
     pub fn poll(&mut self) -> windows::core::Result<()> {
         if self.mgr.is_none() { self.mgr = Some(Manager::RequestAsync()?.join()?); }
@@ -64,20 +66,29 @@ impl Media {
             })
         };
         let raw = (tl.Position()?.Duration - tl.StartTime()?.Duration) as f64 / 1e7;
-        if raw != self.last_raw {
-            // anchor at the player's own report time when it is sane, else now
-            let upd = ticks_to_unix_secs(tl.LastUpdatedTime()?.UniversalTime);
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
-            let age = now - upd;
+        let upd = ticks_to_unix_secs(tl.LastUpdatedTime()?.UniversalTime);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+        let age = now - upd;
+        let sane_age = (0.0..86_400.0).contains(&age);
+        let key = self.state.track.as_ref().map(|t| format!("{}\u{1}{}", t.title, t.artist)).unwrap_or_default();
+        // where the player says we are now (a report is "position P at time T")
+        let reported_now = if playing && sane_age { raw + age } else { raw };
+        // Re-sync when the reported position changes, the song changes (players often report 0 for every new
+        // song, so the number alone doesn't change), or a fresh report disagrees with our estimate (a seek).
+        let resync = should_resync(raw, self.last_raw, &key, &self.last_key, upd, self.last_upd, reported_now, self.state.position());
+        if resync {
             self.state.anchor_pos = raw;
-            self.state.anchor = Some(if (0.0..86_400.0).contains(&age) {
+            self.state.anchor = Some(if sane_age {
                 Instant::now().checked_sub(std::time::Duration::from_secs_f64(age)).unwrap_or_else(Instant::now)
             } else { Instant::now() });
             self.last_raw = raw;
+            self.last_key = key;
+            self.last_upd = upd;
         } else if playing != self.state.playing {
             self.state.anchor_pos = self.state.position();
             self.state.anchor = Some(Instant::now());
         }
+        self.last_upd = upd;
         self.state.playing = playing;
         Ok(())
     }
@@ -113,4 +124,28 @@ pub fn probe(seek: bool) -> windows::core::Result<()> {
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
     Ok(())
+}
+
+/// Re-sync when the reported position changes, the song changes (players often report 0 for every new song,
+/// so the number alone doesn't change), or a fresh report disagrees with our running estimate (a seek).
+#[allow(clippy::too_many_arguments)]
+fn should_resync(raw: f64, last_raw: f64, key: &str, last_key: &str, upd: f64, last_upd: f64, reported_now: f64, estimate: f64) -> bool {
+    raw != last_raw || key != last_key || (upd != last_upd && (reported_now - estimate).abs() > 1.5)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_resync;
+    #[test]
+    fn resync_rules() {
+        // new song, both report 0: must re-sync (the bug that froze lyrics on song change)
+        assert!(should_resync(0.0, 0.0, "B", "A", 100.0, 50.0, 3.0, 180.0));
+        // same song, steady reports that agree with our estimate: keep counting
+        assert!(!should_resync(0.0, 0.0, "A", "A", 100.0, 100.0, 60.0, 60.2));
+        assert!(!should_resync(0.0, 0.0, "A", "A", 101.0, 100.0, 60.0, 60.4));
+        // fresh report far from our estimate (a seek inside the player)
+        assert!(should_resync(0.0, 0.0, "A", "A", 130.0, 100.0, 90.0, 60.0));
+        // reported number changed
+        assert!(should_resync(20.0, 0.0, "A", "A", 100.0, 100.0, 20.0, 60.0));
+    }
 }
