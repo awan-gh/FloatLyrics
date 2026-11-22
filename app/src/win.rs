@@ -38,6 +38,8 @@ pub fn init_process() {
     unsafe { let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2); }
 }
 
+pub fn attach_console() { unsafe { let _ = windows::Win32::System::Console::AttachConsole(windows::Win32::System::Console::ATTACH_PARENT_PROCESS); } }
+
 pub fn com_init_mta() { unsafe { let _ = CoInitializeEx(None, COINIT_MULTITHREADED); } }
 
 pub fn create_overlay(taskbar: bool) -> HWND {
@@ -70,10 +72,12 @@ pub fn show_taskbar(h: HWND, on: bool) {
     }
 }
 
-pub fn cursor_over(h: HWND) -> bool {
+/// Cursor position inside the window (window px), or None when it's outside.
+pub fn cursor_in(h: HWND) -> Option<(f32, f32)> {
     let mut p = POINT::default();
     let r = rect(h);
-    unsafe { GetCursorPos(&mut p).is_ok() && p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom }
+    let inside = unsafe { GetCursorPos(&mut p).is_ok() } && p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom;
+    inside.then(|| ((p.x - r.left) as f32, (p.y - r.top) as f32))
 }
 
 pub fn dpi_scale(h: HWND) -> f32 { unsafe { GetDpiForWindow(h).max(96) as f32 / 96.0 } }

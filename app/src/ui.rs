@@ -17,7 +17,7 @@ macro_rules! each_field {
         $m!(key_hide, s); $m!(key_sooner, s); $m!(key_later, s); $m!(key_tap_sync, s); $m!(key_reset_offset, s);
         $m!(key_centre, s); $m!(key_taskbar, s); $m!(update_mode, s);
         $m!(font_size, f); $m!(outline_width, f); $m!(bg_opacity, f); $m!(next_scale, f); $m!(anim_ms, f);
-        $m!(global_offset, f); $m!(hover_opacity, f); $m!(sub_scale, f); $m!(taskbar_width, f);
+        $m!(global_offset, f); $m!(hover_opacity, f); $m!(hover_trigger, s); $m!(sub_scale, f); $m!(taskbar_width, f);
         $m!(bold, b); $m!(italic, b); $m!(karaoke, b); $m!(duet_view, b); $m!(click_through, b); $m!(show_frame, b);
         $m!(hide_when_idle, b); $m!(hide_when_no_lyrics, b); $m!(show_romaji, b); $m!(romaji_main, b); $m!(sub_all_lines, b); $m!(taskbar_lyrics, b); $m!(autostart, b);
     };
@@ -30,7 +30,12 @@ fn slint_color(s: &str) -> slint::Color {
 
 pub fn push_to_settings(a: &App) {
     let Some(w) = &a.settings_win else { return };
-    let s = &a.s;
+    push_fields(w, &a.s);
+    w.set_hotkey_errors(a.hotkey_errors.clone().into());
+    w.set_update_status(a.update_status.clone().into());
+}
+
+fn push_fields(w: &SettingsWindow, s: &Settings) {
     macro_rules! push {
         ($f:ident, s) => { paste_set!(w, $f, SharedString::from(s.$f.as_str())) };
         ($f:ident, f) => { paste_set!(w, $f, s.$f as f32) };
@@ -45,8 +50,6 @@ pub fn push_to_settings(a: &App) {
     push_swatches(w, s);
     w.set_lyrics_dir(s.lyrics_dir().display().to_string().into());
     w.set_sources(sources_model(s));
-    w.set_hotkey_errors(a.hotkey_errors.clone().into());
-    w.set_update_status(a.update_status.clone().into());
     w.set_version(crate::VERSION.into());
 }
 
@@ -65,7 +68,13 @@ fn sources_model(s: &Settings) -> ModelRc<SourceItem> {
 
 fn pull_from_settings(a: &mut App, w: &SettingsWindow) {
     let old = a.s.clone();
-    let s = &mut a.s;
+    pull_fields(w, &mut a.s, &old);
+    if a.s.autostart != old.autostart { crate::win::apply_autostart(a.s.autostart); }
+    push_swatches(w, &a.s);
+    crate::mark_dirty(a);
+}
+
+fn pull_fields(w: &SettingsWindow, s: &mut Settings, old: &Settings) {
     macro_rules! pull {
         ($f:ident, s) => { s.$f = paste_get!(w, $f).to_string() };
         ($f:ident, f) => { s.$f = paste_get!(w, $f) as f64 };
@@ -81,9 +90,35 @@ fn pull_from_settings(a: &mut App, w: &SettingsWindow) {
         (&mut s.next_color, &old.next_color), (&mut s.outline_color, &old.outline_color), (&mut s.bg_color, &old.bg_color)] {
         if !crate::render::valid_color(new) { *new = prev.clone(); }
     }
-    if s.autostart != old.autostart { crate::win::apply_autostart(s.autostart); }
-    push_swatches(w, s);
-    crate::mark_dirty(a);
+}
+
+/// Self-check (`FloatLyrics.exe --check-settings`): load settings into the real window, show every page,
+/// read them back and report any value the window changed on its own. Prints to the launching console.
+pub fn check_settings_roundtrip(s: Settings) {
+    let w = SettingsWindow::new().unwrap();
+    push_fields(&w, &s);
+    let _ = w.show();
+    let wk = w.as_weak();
+    let page = std::rc::Rc::new(std::cell::Cell::new(0));
+    let timer = slint::Timer::default();
+    timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
+        let Some(w) = wk.upgrade() else { return };
+        let p = page.get();
+        if p < 8 { w.set_page(p); page.set(p + 1); return; }
+        let mut back = s.clone();
+        pull_fields(&w, &mut back, &s);
+        let (a, b) = (serde_json::to_value(&s).unwrap(), serde_json::to_value(&back).unwrap());
+        let mut diffs = 0;
+        for (k, v) in a.as_object().unwrap() {
+            let nv = &b[k];
+            // floats pass through f32 in the UI; ignore that rounding
+            let same = match (v.as_f64(), nv.as_f64()) { (Some(x), Some(y)) => (x - y).abs() < 1e-3, _ => v == nv };
+            if !same { println!("CHANGED {k}: {v} -> {nv}"); diffs += 1; }
+        }
+        println!("settings round-trip: {diffs} changed field(s)");
+        let _ = slint::quit_event_loop();
+    });
+    let _ = slint::run_event_loop_until_quit();
 }
 
 // slint generates set_x/get_x; these keep the macro above readable

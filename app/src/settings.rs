@@ -33,6 +33,8 @@ pub struct Settings {
     pub opacity: f64,
     /// opacity while the mouse is over the lyrics in click-through mode (1 = no change)
     pub hover_opacity: f64,
+    /// what the mouse must be over to fade: "Lyrics text" or "Lyrics + box"
+    pub hover_trigger: String,
     /// Solid, Gradient, Rainbow — how the sung part is filled
     pub fill_style: String,
     // layout
@@ -81,6 +83,9 @@ pub struct Settings {
     pub update_mode: String, // Off, Notify, Download, Auto
     pub autostart: bool,
     pub song_offsets: HashMap<String, f64>,
+    /// settings this version doesn't know (written by a newer/older version) — kept so saving never drops them
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Default for Settings {
@@ -89,19 +94,33 @@ impl Default for Settings {
             font_family: "Segoe UI".into(), font_size: 40.0, bold: true, italic: false, edge_style: "Outline".into(), outline_width: 2.5, karaoke: true, duet_view: true,
             text_color: "#FFFFFFFF".into(), highlight_color: "#FF4FC3F7".into(), highlight_color2: "#FFB388FF".into(),
             next_color: "#C0FFFFFF".into(), outline_color: "#FF000000".into(), bg_color: "#FF000000".into(),
-            bg_opacity: 0.6, bg_mode: "None".into(), opacity: 1.0, hover_opacity: 1.0, fill_style: "Solid".into(),
+            bg_opacity: 0.6, bg_mode: "None".into(), opacity: 1.0, hover_opacity: 1.0, hover_trigger: "Lyrics text".into(), fill_style: "Solid".into(),
             lines_before: 0, lines_after: 1, next_scale: 0.65, align: "Center".into(), width: 1100.0,
             anim_style: "Slide".into(), anim_ms: 350.0, click_through: false, show_frame: true, hide_when_idle: true, hide_when_no_lyrics: false,
             global_offset: 0.0, positions: HashMap::new(), left: -1, top: -1,
             translation_lang: String::new(), show_romaji: false, romaji_main: false, sub_all_lines: false, sub_scale: 0.5,
-            source_order: SourceId::all().to_vec(), source_disabled: vec![SourceId::SodaMusic], lyrics_dir: String::new(), // Soda search is unreliable lyrics_dir: String::new(),
+            source_order: SourceId::all().to_vec(), source_disabled: vec![SourceId::SodaMusic], lyrics_dir: String::new(), // Soda search is unreliable
             taskbar_lyrics: false, taskbar_width: 420.0, taskbar_side: "Right".into(),
             key_click_through: "Ctrl+Alt+L".into(), key_hide: "Ctrl+Alt+H".into(), key_sooner: "Ctrl+Alt+Right".into(),
             key_later: "Ctrl+Alt+Left".into(), key_tap_sync: "Ctrl+Alt+Space".into(), key_reset_offset: "Ctrl+Alt+0".into(),
             key_centre: "Ctrl+Alt+C".into(), key_taskbar: "Ctrl+Alt+T".into(), peek_keys: "Ctrl+Alt".into(),
-            update_mode: "Notify".into(), autostart: true, song_offsets: HashMap::new(),
+            update_mode: "Notify".into(), autostart: true, song_offsets: HashMap::new(), extra: Default::default(),
         }
     }
+}
+
+/// Keep a copy of settings.json from each of the last 5 launches in settings-backups\ (restore by copying one back).
+pub fn backup_on_launch() {
+    let src = app_dir().join("settings.json");
+    if !src.exists() { return; }
+    let dir = app_dir().join("settings-backups");
+    let _ = std::fs::create_dir_all(&dir);
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let _ = std::fs::copy(&src, dir.join(format!("settings-{stamp}.json")));
+    let mut old: Vec<_> = std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
+    old.sort();
+    let excess = old.len().saturating_sub(5);
+    for p in old.into_iter().take(excess) { let _ = std::fs::remove_file(p); }
 }
 
 impl Settings {
@@ -110,7 +129,12 @@ impl Settings {
     pub fn load() -> Self { Self::load_from(&Self::path()) }
 
     pub fn load_from(p: &std::path::Path) -> Self {
-        let mut s: Settings = std::fs::read_to_string(p).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        let mut s: Settings = match std::fs::read_to_string(p).map(|t| serde_json::from_str::<Settings>(&t)) {
+            Ok(Ok(s)) => s,
+            // unreadable JSON: keep a copy so the next save can't destroy the user's settings
+            Ok(Err(_)) => { let _ = std::fs::copy(p, p.with_extension("broken.json")); Settings::default() }
+            Err(_) => Settings::default(),
+        };
         // new sources added in later versions join the end of the user's priority list
         for id in SourceId::all() { if !s.source_order.contains(id) { s.source_order.push(*id); } }
         s
@@ -166,5 +190,23 @@ mod tests {
         let mut expect = s.clone();
         for id in SourceId::all() { if !expect.source_order.contains(id) { expect.source_order.push(*id); } }
         assert_eq!(back, expect);
+    }
+
+    #[test]
+    fn keeps_unknown_and_backs_up_broken() {
+        let p = std::env::temp_dir().join("floatlyrics-rs-extra.json");
+        std::fs::write(&p, r#"{"font_family":"Montserrat","from_a_newer_version":{"a":1}}"#).unwrap();
+        let s = Settings::load_from(&p);
+        assert_eq!(s.font_family, "Montserrat");
+        s.save_to(&p).unwrap();
+        let saved = std::fs::read_to_string(&p).unwrap();
+        assert!(saved.contains("from_a_newer_version"), "unknown setting dropped on save");
+
+        std::fs::write(&p, "{ not json").unwrap();
+        let s = Settings::load_from(&p);
+        assert_eq!(s.font_family, Settings::default().font_family);
+        assert_eq!(std::fs::read_to_string(p.with_extension("broken.json")).unwrap(), "{ not json");
+        let _ = std::fs::remove_file(&p);
+        let _ = std::fs::remove_file(p.with_extension("broken.json"));
     }
 }

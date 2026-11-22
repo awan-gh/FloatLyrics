@@ -79,6 +79,8 @@ pub struct Renderer {
     size: (i32, i32),
     /// text layouts from recent frames, reused while text/style/width stay the same (drawing runs at the display rate)
     cache: std::collections::HashMap<String, (IDWriteTextLayout, f32)>,
+    /// where text was drawn last frame (window px) — for "fade on hover over the words"
+    pub text_rects: Vec<(f32, f32, f32, f32)>,
 }
 
 fn wide(s: &str) -> Vec<u16> { s.encode_utf16().collect() }
@@ -101,7 +103,7 @@ impl Renderer {
             let rt = d2d.CreateDCRenderTarget(&props)?;
             rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE); // ClearType needs an opaque target
             let memdc = CreateCompatibleDC(None);
-            Ok(Self { d2d, dw, custom: None, rt, memdc, dib: HBITMAP::default(), size: (0, 0), cache: Default::default() })
+            Ok(Self { d2d, dw, custom: None, rt, memdc, dib: HBITMAP::default(), size: (0, 0), cache: Default::default(), text_rects: vec![] })
         }
     }
 
@@ -185,6 +187,16 @@ impl Renderer {
             laid.push((top, mh, main, sub));
         }
         let height = fixed_height.unwrap_or((y + pad).ceil() as i32).max(1);
+        self.text_rects.clear();
+        for (row, (top, mh, main, sub)) in rows.iter().zip(&laid) {
+            if row.text.trim().is_empty() { continue; }
+            let n = u16_index(row.text, row.text.chars().count());
+            for (x, y, w, h) in unsafe { hit_rects(main, 0, n) }.unwrap_or_default() { self.text_rects.push((pad + x, top + y, w, h)); }
+            if let Some((sl, _)) = sub {
+                let n = u16_index(row.sub, row.sub.chars().count());
+                for (x, y, w, h) in unsafe { hit_rects(sl, 0, n) }.unwrap_or_default() { self.text_rects.push((pad + x, top + mh + y, w, h)); }
+            }
+        }
         unsafe {
             self.ensure_surface(width, height)?;
             let rt = &self.rt;

@@ -128,6 +128,7 @@ export component SettingsWindow inherits Window {
     in-out property <float> bg-opacity;
     in-out property <float> overlay-opacity;
     in-out property <float> hover-opacity;
+    in-out property <string> hover-trigger;
     // layout
     in-out property <float> lines-before;
     in-out property <float> lines-after;
@@ -214,9 +215,19 @@ export component SettingsWindow inherits Window {
                             Button { text: "Browse Google Fonts…"; primary: true; clicked => { root.browse-google-fonts(); } }
                         }
                         LineEdit { placeholder-text: "Search installed fonts…"; edited => { root.filter-fonts(self.text); } }
-                        StandardListView {
-                            height: 200px; model: root.font-matches;
-                            current-item-changed(i) => { if (i >= 0) { root.pick-font(root.font-matches[i].text); } }
+                        // applies only on an explicit click (a selection-based list re-fired when its contents reloaded)
+                        Rectangle {
+                            height: 200px;
+                            border-radius: 6px; border-width: 1px; border-color: Palette.border;
+                            ListView {
+                                for f in root.font-matches: Rectangle {
+                                    height: 32px;
+                                    background: f.text == root.font-family ? Palette.accent-background.with-alpha(0.18) : fta.has-hover ? Palette.foreground.with-alpha(0.06) : transparent;
+                                    Text { x: 12px; text: f.text; font-size: 13px; vertical-alignment: center; height: parent.height; }
+                                    if f.text == root.font-family: Image { x: parent.width - 28px; width: 16px; height: 16px; source: @image-url("icons/check.svg"); colorize: Palette.accent-background; }
+                                    fta := TouchArea { clicked => { root.pick-font(f.text); } }
+                                }
+                            }
                         }
                         Row {
                             label: "Font files";
@@ -275,6 +286,7 @@ export component SettingsWindow inherits Window {
                         Row { label: "Background opacity"; ValueSlider { minimum: 0; maximum: 1; value <=> root.bg-opacity; edited => { root.changed(); } } }
                         Row { label: "Overall opacity"; ValueSlider { minimum: 0.1; maximum: 1; value <=> root.overlay-opacity; edited => { root.changed(); } } }
                         Row { label: "Opacity on hover"; hint: "In click-through mode, fade to this when the mouse is over the lyrics so you can see behind. 1 = off."; ValueSlider { minimum: 0.05; maximum: 1; value <=> root.hover-opacity; edited => { root.changed(); } } }
+                        Row { label: "Fade when hovering"; hint: "Over the words only, or anywhere on the lyrics box"; ComboBox { width: 180px; model: ["Lyrics text", "Lyrics + box"]; current-value <=> root.hover-trigger; selected => { root.changed(); } } }
                     }
                 }
 

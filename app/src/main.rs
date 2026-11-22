@@ -87,6 +87,13 @@ pub fn with_app<R>(f: impl FnOnce(&mut App) -> R) -> Option<R> {
 
 fn main() {
     velopack::VelopackApp::build().run(); // handles install/update hooks, must run first
+    if std::env::args().any(|x| x == "--check-settings") {
+        win::attach_console();
+        let path = std::env::args().skip_while(|x| x != "--check-settings").nth(1);
+        let s = path.map(|p| Settings::load_from(std::path::Path::new(&p))).unwrap_or_else(Settings::load);
+        ui::check_settings_roundtrip(s);
+        return;
+    }
     if !win::single_instance() { return; }
     win::init_process();
 
@@ -94,6 +101,7 @@ fn main() {
     let now = Arc::new(Mutex::new(media::NowPlaying::default()));
     media_thread(now.clone());
 
+    settings::backup_on_launch();
     let s = Settings::load();
     let mut r = Renderer::new().expect("Direct2D unavailable");
     let custom = r.load_fonts(&Settings::fonts_dir());
@@ -153,7 +161,15 @@ pub fn frame() {
     with_app(|a| {
         // hover fade: only while click-through (otherwise the mouse is there to drag it)
         let fade_on_hover = a.applied_ct == Some(true) && a.s.hover_opacity < 0.999;
-        a.hover_target = if fade_on_hover && win::cursor_over(a.hwnd) { 1.0 } else { 0.0 };
+        let over = fade_on_hover && match win::cursor_in(a.hwnd) {
+            None => false,
+            Some((x, y)) if a.s.hover_trigger == "Lyrics text" => {
+                let m = 4.0 * win::dpi_scale(a.hwnd); // a little slack around the glyphs
+                a.r.text_rects.iter().any(|r| x >= r.0 - m && x < r.0 + r.2 + m && y >= r.1 - m && y < r.1 + r.3 + m)
+            }
+            Some(_) => true,
+        };
+        a.hover_target = if over { 1.0 } else { 0.0 };
         let dt = a.last_frame.elapsed().as_secs_f32();
         let fading = (a.hover_mix - a.hover_target).abs() > 0.001;
         let busy = fading || a.anim.is_some() || a.s.fill_style == "Rainbow" || (a.lyric.is_some() && a.s.karaoke && a.now.lock().unwrap().playing);
