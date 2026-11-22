@@ -85,7 +85,7 @@ impl Media {
 
 /// Diagnostic (`FloatLyrics.exe --probe-media`): print what the player reports every 0.5 s for 12 s,
 /// skipping +20 s at 3 s and back at 8 s, to see whether the player reports seeks to Windows.
-pub fn probe() -> windows::core::Result<()> {
+pub fn probe(seek: bool) -> windows::core::Result<()> {
     let mgr = Manager::RequestAsync()?.join()?;
     let pick = || -> windows::core::Result<Option<windows::Media::Control::GlobalSystemMediaTransportControlsSession>> {
         for s in &mgr.GetSessions()? {
@@ -102,9 +102,10 @@ pub fn probe() -> windows::core::Result<()> {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
         let st = s.GetPlaybackInfo()?.PlaybackStatus()?;
         let _ = m.poll();
+        if i == 0 { let p = s.TryGetMediaPropertiesAsync()?.join()?; println!("title={:?} artist={:?} album={:?} duration={:.1}s", p.Title()?.to_string_lossy(), p.Artist()?.to_string_lossy(), p.AlbumTitle()?.to_string_lossy(), (tl.EndTime()?.Duration - tl.StartTime()?.Duration) as f64 / 1e7); }
         println!("{:>5.1}s  app={}  status={:?}  reported={:7.2}s  report_age={:6.2}s  floatlyrics={:7.2}s",
             i as f64 * 0.5, s.SourceAppUserModelId()?.to_string_lossy(), st.0, raw, now - upd, m.state.position());
-        if i == 6 || i == 16 {
+        if seek && (i == 6 || i == 16) {
             let target = if i == 6 { raw + 20.0 } else { (raw - 20.0).max(0.0) };
             let ok = s.TryChangePlaybackPositionAsync((target * 1e7) as i64)?.join().unwrap_or(false);
             println!("        -> asked player to seek to {target:.1}s (accepted: {ok})");

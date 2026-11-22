@@ -75,6 +75,8 @@ pub struct App {
     started: Instant,
     last_place: Instant,
     last_frame: Instant,
+    applied_topmost: Option<bool>,
+    last_topmost: Instant,
     hover_mix: f32,
     hover_target: f32,
     pub offset_win: Option<OffsetWindow>,
@@ -92,7 +94,7 @@ fn main() {
     if std::env::args().any(|x| x == "--probe-media") {
         win::attach_console();
         win::com_init_mta();
-        if let Err(e) = media::probe() { println!("probe failed: {e}"); }
+        if let Err(e) = media::probe(std::env::args().any(|x| x == "seek")) { println!("probe failed: {e}"); }
         return;
     }
     if std::env::args().any(|x| x == "--check-settings") {
@@ -128,6 +130,8 @@ fn main() {
         hotkey_errors: String::new(), pending_update: None, update_downloaded: false, last_update_check: Instant::now(), update_status: String::new(), started: Instant::now(),
         last_place: Instant::now() - Duration::from_secs(5),
         last_frame: Instant::now(),
+        applied_topmost: None,
+        last_topmost: Instant::now(),
         hover_mix: 0.0,
         hover_target: 0.0,
         offset_win: None,
@@ -356,6 +360,12 @@ fn tick(a: &mut App) {
     a.peek = p;
     let ct = a.s.click_through && !p;
     if a.applied_ct != Some(ct) { win::set_click_through(a.hwnd, ct); a.applied_ct = Some(ct); }
+    // other always-on-top windows activated later sit above us; take the top spot back every second
+    if a.applied_topmost != Some(a.s.always_on_top) || (a.s.always_on_top && a.last_topmost.elapsed() >= Duration::from_secs(1)) {
+        win::set_topmost(a.hwnd, a.s.always_on_top);
+        a.applied_topmost = Some(a.s.always_on_top);
+        a.last_topmost = Instant::now();
+    }
     ui::menu_autohide(a);
     draw(a, !ct);
 }

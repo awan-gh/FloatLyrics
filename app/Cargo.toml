@@ -2,7 +2,7 @@
 name = "floatlyrics"
 version = "1.0.4"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-only"
 description = "Floating synced lyrics overlay for any Windows media player"
 build = "build.rs"
 

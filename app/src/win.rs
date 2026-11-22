@@ -65,6 +65,11 @@ pub fn set_click_through(h: HWND, on: bool) {
     }
 }
 
+pub fn set_topmost(h: HWND, on: bool) {
+    let after = if on { HWND_TOPMOST } else { HWND_NOTOPMOST };
+    unsafe { let _ = SetWindowPos(h, Some(after), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER); }
+}
+
 pub fn show_taskbar(h: HWND, on: bool) {
     unsafe {
         let vis = IsWindowVisible(h).as_bool();

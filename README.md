@@ -57,5 +57,5 @@ cargo build --release -p floatlyrics          # target/release/FloatLyrics.exe
 - Built with [Slint](https://slint.dev), [Velopack](https://velopack.io) and [windows-rs](https://github.com/microsoft/windows-rs).
 
 ## Licence
-MIT (see `LICENSE`). Ported engine code keeps its Apache-2.0 licence (see `NOTICE`).
+GPL-3.0-only (see `LICENSE`). Ported engine code keeps its Apache-2.0 licence, which is compatible with GPLv3 (see `NOTICE`).
 Lyrics are fetched from third-party services for personal use; their content belongs to their respective owners.

@@ -46,6 +46,7 @@ fn push_fields(w: &SettingsWindow, s: &Settings) {
     w.set_lines_before(s.lines_before as f32);
     w.set_lines_after(s.lines_after as f32);
     w.set_overlay_opacity(s.opacity as f32);
+    w.set_stay_on_top(s.always_on_top); // Window already has an always-on-top property
     w.set_screen_width(unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) } as f32);
     push_swatches(w, s);
     w.set_lyrics_dir(s.lyrics_dir().display().to_string().into());
@@ -83,6 +84,7 @@ fn pull_fields(w: &SettingsWindow, s: &mut Settings, old: &Settings) {
     each_field!(pull);
     s.width = w.get_width_px() as f64;
     s.opacity = w.get_overlay_opacity() as f64;
+    s.always_on_top = w.get_stay_on_top();
     s.lines_before = w.get_lines_before().round() as u32;
     s.lines_after = w.get_lines_after().round() as u32;
     // invalid colours keep their previous value until the text becomes valid
@@ -255,7 +257,7 @@ fn pick_color(which: &str) {
 }
 
 // ---------------- tray menu ----------------
-const MAIN: &[&str] = &["Click-through", "Hide / show", "Position", "Taskbar lyrics", "Settings…", "", "Lyrics sooner (+0.5s)", "Lyrics later (−0.5s)",
+const MAIN: &[&str] = &["Click-through", "Always on top", "Hide / show", "Position", "Taskbar lyrics", "Settings…", "", "Lyrics sooner (+0.5s)", "Lyrics later (−0.5s)",
     "Tap-sync: next line starts now", "Adjust timing…", "Reset this song's offset", "", "Search lyrics manually…", "Reload lyrics (skip cache)", "Open lyrics folder", "", "Exit"];
 const POS: &[&str] = &["Back", "", "Top left", "Top centre", "Top right", "Centre", "Bottom left", "Bottom centre", "Bottom right", "", "Move to next monitor"];
 
@@ -293,7 +295,7 @@ fn refresh_menu(a: &App) {
         MAIN.iter().map(|s| MenuItem {
             // MAIN keeps the stable key that menu_chosen matches; only the shown text follows the state
             text: match *s { "Hide / show" if a.manual_hidden => "Show lyrics", "Hide / show" => "Hide lyrics", s => s }.into(),
-            checked: match *s { "Click-through" => a.s.click_through, "Taskbar lyrics" => a.s.taskbar_lyrics, _ => false },
+            checked: match *s { "Click-through" => a.s.click_through, "Always on top" => a.s.always_on_top, "Taskbar lyrics" => a.s.taskbar_lyrics, _ => false },
             arrow: if *s == "Position" { 1 } else { 0 },
         }).collect()
     } else { POS.iter().map(|s| MenuItem { text: (*s).into(), checked: false, arrow: if *s == "Back" { 2 } else { 0 } }).collect() };
@@ -336,6 +338,7 @@ fn menu_chosen(i: i32) {
             "Click-through" => { a.s.click_through = !a.s.click_through; crate::mark_dirty(a); push_to_settings(a); }
             "Hide / show" => a.manual_hidden = !a.manual_hidden,
             "Taskbar lyrics" => { a.s.taskbar_lyrics = !a.s.taskbar_lyrics; crate::mark_dirty(a); push_to_settings(a); }
+            "Always on top" => { a.s.always_on_top = !a.s.always_on_top; crate::mark_dirty(a); push_to_settings(a); }
             "Lyrics sooner (+0.5s)" => crate::set_song_offset(a, a.song_offset + 0.5),
             "Lyrics later (−0.5s)" => crate::set_song_offset(a, a.song_offset - 0.5),
             "Tap-sync: next line starts now" => crate::tap_sync(a),

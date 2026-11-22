@@ -141,6 +141,7 @@ export component SettingsWindow inherits Window {
     in-out property <float> anim-ms;
     in-out property <bool> click-through;
     in-out property <bool> show-frame;
+    in-out property <bool> stay-on-top;
     in-out property <bool> hide-when-idle;
     in-out property <bool> hide-when-no-lyrics;
     in-out property <float> global-offset;
@@ -313,6 +314,7 @@ export component SettingsWindow inherits Window {
                     Card {
                         title: "Window";
                         Row { label: "Click-through"; hint: "Clicks go to whatever is underneath. Hold the grab keys to move it."; Switch { checked <=> root.click-through; toggled => { root.changed(); } } }
+                        Row { label: "Always on top"; hint: "Stay above other windows, including ones that are also always on top (e.g. browser video popouts)"; Switch { checked <=> root.stay-on-top; toggled => { root.changed(); } } }
                         Row { label: "Frame while movable"; hint: "Box and border when the overlay can be dragged"; Switch { checked <=> root.show-frame; toggled => { root.changed(); } } }
                         Row { label: "Hide when nothing plays"; Switch { checked <=> root.hide-when-idle; toggled => { root.changed(); } } }
                         Row { label: "Hide when no lyrics found"; hint: "Stays hidden for songs without lyrics; hold the grab keys to see it"; Switch { checked <=> root.hide-when-no-lyrics; toggled => { root.changed(); } } }
@@ -411,7 +413,7 @@ export component SettingsWindow inherits Window {
                     }
                     Card {
                         title: "About FloatLyrics " + root.version;
-                        subtitle: "Open source (MIT).";
+                        subtitle: "Open source (GPL-3.0).";
                         Text {
                             wrap: word-wrap; font-size: 13px;
                             text: "Inspired by MiniLyrics, the classic floating-lyrics plugin for Winamp.\nLyrics engine ported from Lyricify Lyrics Helper by WXRIW (Apache-2.0).\nLyrics from LRCLIB, QQ Music, NetEase Cloud Music, Kugou and others. Translation by Google Translate.\nBuilt with Rust, Slint and Velopack.";
