@@ -110,6 +110,7 @@ export component SettingsWindow inherits Window {
     in-out property <float> font-size;
     in-out property <bool> bold;
     in-out property <bool> italic;
+    in-out property <string> text-antialias;
     in-out property <string> edge-style;
     in-out property <float> outline-width;
     in-out property <bool> karaoke;
@@ -169,6 +170,7 @@ export component SettingsWindow inherits Window {
     in property <string> hotkey-errors;
     // app
     in-out property <string> update-mode;
+    in-out property <float> update-check-hours;
     in-out property <bool> autostart;
     in property <string> update-status;
     in property <string> version;
@@ -238,6 +240,7 @@ export component SettingsWindow inherits Window {
                         Row { label: "Size"; ValueSlider { minimum: 12; maximum: 140; decimals: 0; value <=> root.font-size; edited => { root.changed(); } } }
                         Row { label: "Bold"; Switch { checked <=> root.bold; toggled => { root.changed(); } } }
                         Row { label: "Italic"; Switch { checked <=> root.italic; toggled => { root.changed(); } } }
+                        Row { label: "Anti-aliasing"; hint: "Smooth = soft edges · Sharp = crisper, pixel-snapped · Off = hard pixel edges"; ComboBox { width: 160px; model: ["Smooth", "Sharp", "Off"]; current-value <=> root.text-antialias; selected => { root.changed(); } } }
                     }
                     Card {
                         title: "Edge";
@@ -402,6 +405,7 @@ export component SettingsWindow inherits Window {
                             font-size: 12px; color: Palette.foreground.with-alpha(0.6); wrap: word-wrap;
                             text: "Notify: tray notification, click to install · Download: downloads quietly, installs when you exit · Auto: downloads and restarts into the new version";
                         }
+                        Row { label: "Check every (hours)"; hint: "While FloatLyrics is running. 0 = only when it starts."; ValueSlider { minimum: 0; maximum: 48; decimals: 0; value <=> root.update-check-hours; edited => { root.changed(); } } }
                         Row { label: "Check now"; hint: root.update-status; Button { text: "Check for updates"; clicked => { root.check-updates(); } } }
                         Row { label: "Start with Windows"; Switch { checked <=> root.autostart; toggled => { root.changed(); } } }
                     }

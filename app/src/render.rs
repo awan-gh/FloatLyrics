@@ -67,6 +67,8 @@ pub struct Style {
     pub fade: f32,
     /// seconds, drives the rainbow motion
     pub clock: f64,
+    /// text anti-aliasing: "Smooth", "Sharp" (pixel-snapped) or "Off"
+    pub text_aa: String,
 }
 
 pub struct Renderer {
@@ -81,6 +83,8 @@ pub struct Renderer {
     cache: std::collections::HashMap<String, (IDWriteTextLayout, f32)>,
     /// where text was drawn last frame (window px) — for "fade on hover over the words"
     pub text_rects: Vec<(f32, f32, f32, f32)>,
+    /// pixel-snapped rendering params for the "Sharp" anti-aliasing choice (created on first use)
+    sharp: Option<IDWriteRenderingParams>,
 }
 
 fn wide(s: &str) -> Vec<u16> { s.encode_utf16().collect() }
@@ -103,7 +107,7 @@ impl Renderer {
             let rt = d2d.CreateDCRenderTarget(&props)?;
             rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE); // ClearType needs an opaque target
             let memdc = CreateCompatibleDC(None);
-            Ok(Self { d2d, dw, custom: None, rt, memdc, dib: HBITMAP::default(), size: (0, 0), cache: Default::default(), text_rects: vec![] })
+            Ok(Self { d2d, dw, custom: None, rt, memdc, dib: HBITMAP::default(), size: (0, 0), cache: Default::default(), text_rects: vec![], sharp: None })
         }
     }
 
@@ -200,6 +204,15 @@ impl Renderer {
         unsafe {
             self.ensure_surface(width, height)?;
             let rt = &self.rt;
+            // ClearType isn't possible on a transparent target, so the choices are grayscale (smooth/sharp) or aliased
+            rt.SetTextAntialiasMode(if st.text_aa == "Off" { D2D1_TEXT_ANTIALIAS_MODE_ALIASED } else { D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE });
+            if st.text_aa == "Sharp" {
+                if self.sharp.is_none() {
+                    self.sharp = self.dw.CreateCustomRenderingParams(1.8, 0.5, 0.5, 0.0, DWRITE_PIXEL_GEOMETRY_FLAT, DWRITE_RENDERING_MODE1_GDI_CLASSIC, DWRITE_GRID_FIT_MODE_ENABLED).ok().and_then(|p| p.cast().ok());
+                }
+            }
+            let rt = &self.rt;
+            rt.SetTextRenderingParams(if st.text_aa == "Sharp" { self.sharp.as_ref() } else { None });
             rt.BeginDraw();
             rt.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
             let rect = D2D_RECT_F { left: 0.5, top: 0.5, right: width as f32 - 0.5, bottom: height as f32 - 0.5 };

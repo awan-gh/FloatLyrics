@@ -53,6 +53,7 @@ pub fn on_event(a: &mut App, e: Event) {
             a.pending_update = Some(info);
         }
         Event::Downloaded(info) => {
+            a.update_downloaded = true;
             let v = info.TargetFullRelease.Version.clone();
             a.update_status = format!("Version {v} downloaded — installs when FloatLyrics exits");
             crate::win::balloon(a.hwnd, "FloatLyrics update", &format!("Version {v} will be installed when you exit."));

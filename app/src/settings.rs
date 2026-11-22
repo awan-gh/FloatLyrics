@@ -15,6 +15,8 @@ pub struct Settings {
     pub font_size: f64,
     pub bold: bool,
     pub italic: bool,
+    /// "Smooth", "Sharp" or "Off"
+    pub text_antialias: String,
     /// None, Outline, Shadow, Raised, Depressed
     pub edge_style: String,
     pub outline_width: f64,
@@ -81,6 +83,8 @@ pub struct Settings {
     pub peek_keys: String,
     // app
     pub update_mode: String, // Off, Notify, Download, Auto
+    /// hours between automatic update checks while running; 0 = only at startup
+    pub update_check_hours: f64,
     pub autostart: bool,
     pub song_offsets: HashMap<String, f64>,
     /// settings this version doesn't know (written by a newer/older version) — kept so saving never drops them
@@ -91,7 +95,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            font_family: "Segoe UI".into(), font_size: 40.0, bold: true, italic: false, edge_style: "Outline".into(), outline_width: 2.5, karaoke: true, duet_view: true,
+            font_family: "Segoe UI".into(), font_size: 40.0, bold: true, italic: false, text_antialias: "Smooth".into(), edge_style: "Outline".into(), outline_width: 2.5, karaoke: true, duet_view: true,
             text_color: "#FFFFFFFF".into(), highlight_color: "#FF4FC3F7".into(), highlight_color2: "#FFB388FF".into(),
             next_color: "#C0FFFFFF".into(), outline_color: "#FF000000".into(), bg_color: "#FF000000".into(),
             bg_opacity: 0.6, bg_mode: "None".into(), opacity: 1.0, hover_opacity: 1.0, hover_trigger: "Lyrics text".into(), fill_style: "Solid".into(),
@@ -104,7 +108,7 @@ impl Default for Settings {
             key_click_through: "Ctrl+Alt+L".into(), key_hide: "Ctrl+Alt+H".into(), key_sooner: "Ctrl+Alt+Right".into(),
             key_later: "Ctrl+Alt+Left".into(), key_tap_sync: "Ctrl+Alt+Space".into(), key_reset_offset: "Ctrl+Alt+0".into(),
             key_centre: "Ctrl+Alt+C".into(), key_taskbar: "Ctrl+Alt+T".into(), peek_keys: "Ctrl+Alt".into(),
-            update_mode: "Notify".into(), autostart: true, song_offsets: HashMap::new(), extra: Default::default(),
+            update_mode: "Notify".into(), update_check_hours: 6.0, autostart: true, song_offsets: HashMap::new(), extra: Default::default(),
         }
     }
 }

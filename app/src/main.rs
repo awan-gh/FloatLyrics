@@ -69,6 +69,8 @@ pub struct App {
     pub gf_win: Option<GoogleFontsWindow>,
     pub hotkey_errors: String,
     pub pending_update: Option<update::Pending>,
+    pub update_downloaded: bool,
+    last_update_check: Instant,
     pub update_status: String,
     started: Instant,
     last_place: Instant,
@@ -123,7 +125,7 @@ fn main() {
         s, r, tb_r, hwnd, tb_hwnd, now, track: None, lyric: None, song_key: String::new(), status: String::new(),
         song_offset: 0.0, tx, rx, manual_hidden: false, peek: false, applied_ct: None, anim: None, anim_index: -2,
         anim_key: String::new(), dirty: None, settings_win: None, menu: None, menu_page: 0, prompt: None, hits: vec![], search_gen: 0, search_done: 0, fonts, gf: vec![], gf_gen: 0, gf_model: None, gf_win: None,
-        hotkey_errors: String::new(), pending_update: None, update_status: String::new(), started: Instant::now(),
+        hotkey_errors: String::new(), pending_update: None, update_downloaded: false, last_update_check: Instant::now(), update_status: String::new(), started: Instant::now(),
         last_place: Instant::now() - Duration::from_secs(5),
         last_frame: Instant::now(),
         hover_mix: 0.0,
@@ -340,6 +342,13 @@ fn tick(a: &mut App) {
         ui::refresh_offset(a);
         win::tray_tip(a);
     }
+    // periodic update check (startup check already ran); skip once an update is waiting to be installed
+    let every = (a.s.update_check_hours.round() as u64) * 3600;
+    if every > 0 && a.s.update_mode != "Off" && a.pending_update.is_none() && !a.update_downloaded
+        && a.last_update_check.elapsed() >= Duration::from_secs(every) {
+        a.last_update_check = Instant::now();
+        update::check_in_background(a, false);
+    }
     // debounced save
     if a.dirty.is_some_and(|d| d.elapsed() > Duration::from_millis(600)) { a.dirty = None; a.s.save(); }
     // click-through + hold-to-grab
@@ -444,7 +453,7 @@ fn draw(a: &mut App, interactive: bool) {
         hl: render::color(&s.highlight_color), hl2: render::color(&s.highlight_color2), fill,
         // alpha-0 pixels don't receive the mouse, so keep a hint of background while movable
         bg: if interactive && bg.a < 0.004 { render::D2D1_COLOR_F_TRANSPARENT_HIT } else { bg },
-        frame, opacity: s.opacity as f32 * (1.0 - a.hover_mix * (1.0 - s.hover_opacity as f32)), padding: 12.0 * scale, slide, fade, clock: a.started.elapsed().as_secs_f64(),
+        frame, opacity: s.opacity as f32 * (1.0 - a.hover_mix * (1.0 - s.hover_opacity as f32)), padding: 12.0 * scale, slide, fade, clock: a.started.elapsed().as_secs_f64(), text_aa: s.text_antialias.clone(),
     };
     let (main_c, other_c) = (render::color(&s.text_color), render::color(&s.next_color));
     // fill style also colours the whole current line when the wipe is off
