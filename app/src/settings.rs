@@ -53,6 +53,7 @@ pub struct Settings {
     pub always_on_top: bool,
     pub hide_when_idle: bool,
     pub hide_when_no_lyrics: bool,
+    pub hide_when_paused: bool,
     pub global_offset: f64,
     pub left: i32,
     /// overlay position per monitor arrangement (key = all monitor rectangles)
@@ -102,7 +103,7 @@ impl Default for Settings {
             next_color: "#C0FFFFFF".into(), outline_color: "#FF000000".into(), bg_color: "#FF000000".into(),
             bg_opacity: 0.6, bg_mode: "None".into(), opacity: 1.0, hover_opacity: 1.0, hover_trigger: "Lyrics text".into(), fill_style: "Solid".into(),
             lines_before: 0, lines_after: 1, next_scale: 0.65, align: "Center".into(), width: 1100.0,
-            anim_style: "Slide".into(), anim_ms: 350.0, click_through: false, show_frame: true, always_on_top: true, hide_when_idle: true, hide_when_no_lyrics: false,
+            anim_style: "Slide".into(), anim_ms: 350.0, click_through: false, show_frame: true, always_on_top: true, hide_when_idle: true, hide_when_no_lyrics: false, hide_when_paused: false,
             global_offset: 0.0, positions: HashMap::new(), left: -1, top: -1,
             translation_lang: String::new(), show_romaji: false, romaji_main: false, sub_all_lines: false, sub_scale: 0.5,
             source_order: SourceId::all().to_vec(), source_disabled: vec![SourceId::SodaMusic], lyrics_dir: String::new(), // Soda search is unreliable

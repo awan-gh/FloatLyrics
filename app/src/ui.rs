@@ -19,7 +19,7 @@ macro_rules! each_field {
         $m!(font_size, f); $m!(outline_width, f); $m!(bg_opacity, f); $m!(next_scale, f); $m!(anim_ms, f);
         $m!(global_offset, f); $m!(hover_opacity, f); $m!(hover_trigger, s); $m!(sub_scale, f); $m!(taskbar_width, f); $m!(update_check_hours, f);
         $m!(bold, b); $m!(italic, b); $m!(karaoke, b); $m!(duet_view, b); $m!(click_through, b); $m!(show_frame, b);
-        $m!(hide_when_idle, b); $m!(hide_when_no_lyrics, b); $m!(show_romaji, b); $m!(romaji_main, b); $m!(sub_all_lines, b); $m!(taskbar_lyrics, b); $m!(autostart, b);
+        $m!(hide_when_idle, b); $m!(hide_when_no_lyrics, b); $m!(hide_when_paused, b); $m!(show_romaji, b); $m!(romaji_main, b); $m!(sub_all_lines, b); $m!(taskbar_lyrics, b); $m!(autostart, b);
     };
 }
 

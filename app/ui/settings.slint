@@ -144,6 +144,7 @@ export component SettingsWindow inherits Window {
     in-out property <bool> stay-on-top;
     in-out property <bool> hide-when-idle;
     in-out property <bool> hide-when-no-lyrics;
+    in-out property <bool> hide-when-paused;
     in-out property <float> global-offset;
     // translation
     in-out property <string> translation-lang;
@@ -317,6 +318,7 @@ export component SettingsWindow inherits Window {
                         Row { label: "Always on top"; hint: "Stay above other windows, including ones that are also always on top (e.g. browser video popouts)"; Switch { checked <=> root.stay-on-top; toggled => { root.changed(); } } }
                         Row { label: "Frame while movable"; hint: "Box and border when the overlay can be dragged"; Switch { checked <=> root.show-frame; toggled => { root.changed(); } } }
                         Row { label: "Hide when nothing plays"; Switch { checked <=> root.hide-when-idle; toggled => { root.changed(); } } }
+                        Row { label: "Hide when paused"; hint: "Hidden while the song is paused; hold the grab keys to see it"; Switch { checked <=> root.hide-when-paused; toggled => { root.changed(); } } }
                         Row { label: "Hide when no lyrics found"; hint: "Stays hidden for songs without lyrics; hold the grab keys to see it"; Switch { checked <=> root.hide-when-no-lyrics; toggled => { root.changed(); } } }
                         Row { label: "Global timing offset (s)"; hint: "Shifts every song; per-song offsets come on top"; ValueSlider { minimum: -5; maximum: 5; value <=> root.global-offset; edited => { root.changed(); } } }
                     }

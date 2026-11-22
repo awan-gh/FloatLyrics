@@ -396,7 +396,8 @@ fn draw(a: &mut App, interactive: bool) {
     let s = &a.s;
     let scale = win::dpi_scale(a.hwnd);
     let no_lyrics = a.track.is_some() && a.lyric.is_none() && a.status.starts_with("no lyrics");
-    let hidden = a.manual_hidden || (!interactive && ((a.track.is_none() && s.hide_when_idle) || (no_lyrics && s.hide_when_no_lyrics)));
+    let paused = a.track.is_some() && !a.now.lock().unwrap().playing;
+    let hidden = a.manual_hidden || (!interactive && ((a.track.is_none() && s.hide_when_idle) || (no_lyrics && s.hide_when_no_lyrics) || (paused && s.hide_when_paused)));
 
     // what to show
     let mut lines: Vec<(String, String, Option<Line>)> = vec![]; // (text, sub, line) for before.., current, after..
