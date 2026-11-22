@@ -17,7 +17,7 @@ macro_rules! each_field {
         $m!(key_hide, s); $m!(key_sooner, s); $m!(key_later, s); $m!(key_tap_sync, s); $m!(key_reset_offset, s);
         $m!(key_centre, s); $m!(key_taskbar, s); $m!(update_mode, s);
         $m!(font_size, f); $m!(outline_width, f); $m!(bg_opacity, f); $m!(next_scale, f); $m!(anim_ms, f);
-        $m!(global_offset, f); $m!(sub_scale, f); $m!(taskbar_width, f);
+        $m!(global_offset, f); $m!(hover_opacity, f); $m!(sub_scale, f); $m!(taskbar_width, f);
         $m!(bold, b); $m!(italic, b); $m!(karaoke, b); $m!(duet_view, b); $m!(click_through, b); $m!(show_frame, b);
         $m!(hide_when_idle, b); $m!(hide_when_no_lyrics, b); $m!(show_romaji, b); $m!(romaji_main, b); $m!(sub_all_lines, b); $m!(taskbar_lyrics, b); $m!(autostart, b);
     };
@@ -221,7 +221,7 @@ fn pick_color(which: &str) {
 
 // ---------------- tray menu ----------------
 const MAIN: &[&str] = &["Click-through", "Hide / show", "Position", "Taskbar lyrics", "Settings…", "", "Lyrics sooner (+0.5s)", "Lyrics later (−0.5s)",
-    "Tap-sync: next line starts now", "Reset this song's offset", "", "Search lyrics manually…", "Reload lyrics (skip cache)", "Open lyrics folder", "", "Exit"];
+    "Tap-sync: next line starts now", "Adjust timing…", "Reset this song's offset", "", "Search lyrics manually…", "Reload lyrics (skip cache)", "Open lyrics folder", "", "Exit"];
 const POS: &[&str] = &["Back", "", "Top left", "Top centre", "Top right", "Centre", "Bottom left", "Bottom centre", "Bottom right", "", "Move to next monitor"];
 
 thread_local! { static MENU_SHOWN: std::cell::Cell<Option<Instant>> = const { std::cell::Cell::new(None) }; }
@@ -295,6 +295,7 @@ fn menu_chosen(i: i32) {
     match label {
         "Settings…" => open_settings(),
         "Search lyrics manually…" => open_prompt(),
+        "Adjust timing…" => open_offset(),
         "Exit" => { let _ = slint::quit_event_loop(); }
         _ => { with_app(|a| match label {
             "Click-through" => { a.s.click_through = !a.s.click_through; crate::mark_dirty(a); push_to_settings(a); }
@@ -309,6 +310,41 @@ fn menu_chosen(i: i32) {
             _ => {}
         }); }
     }
+}
+
+// ---------------- custom timing ----------------
+/// Keep the timing window in sync when the song or offset changes elsewhere (hotkeys, menu).
+pub fn refresh_offset(a: &App) { if let Some(w) = &a.offset_win { w.set_info(offset_text(a).into()); } }
+
+fn offset_text(a: &App) -> String {
+    match &a.track {
+        None => "Nothing playing".into(),
+        Some(t) => format!("{} — {}\nCurrent offset: {:+.2} s (positive = lyrics sooner)", t.title, t.artist, a.song_offset),
+    }
+}
+
+pub fn open_offset() {
+    if let Some(Some(w)) = with_app(|a| a.offset_win.as_ref().map(|w| w.as_weak())) { if let Some(w) = w.upgrade() { let _ = w.show(); return; } }
+    let w = crate::OffsetWindow::new().unwrap();
+    let wk = w.as_weak();
+    let refresh = move |a: &App| if let Some(w) = wk.upgrade() { w.set_info(offset_text(a).into()); };
+    let r1 = refresh.clone();
+    let wk = w.as_weak();
+    w.on_apply(move |txt| {
+        let Some(w) = wk.upgrade() else { return };
+        match crate::parse_shift(&txt) {
+            Some(v) => { with_app(|a| { crate::set_song_offset(a, a.song_offset + v); r1(a); }); w.set_error("".into()); w.set_amount("".into()); }
+            None => w.set_error("Type a number of seconds, e.g. -5 or +1.3".into()),
+        }
+    });
+    let r2 = refresh.clone();
+    w.on_nudge(move |v| { with_app(|a| { crate::set_song_offset(a, a.song_offset + v as f64); r2(a); }); });
+    let r3 = refresh.clone();
+    w.on_reset(move || { with_app(|a| { crate::set_song_offset(a, 0.0); r3(a); }); });
+    w.window().on_close_requested(|| { with_app(|a| a.offset_win = None); slint::CloseRequestResponse::HideWindow });
+    with_app(|a| refresh(a));
+    let _ = w.show();
+    with_app(|a| a.offset_win = Some(w));
 }
 
 // ---------------- manual search ----------------

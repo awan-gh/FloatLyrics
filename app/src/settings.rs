@@ -31,6 +31,8 @@ pub struct Settings {
     /// None, Block (one box), Line (box behind each text line, caption style)
     pub bg_mode: String,
     pub opacity: f64,
+    /// opacity while the mouse is over the lyrics in click-through mode (1 = no change)
+    pub hover_opacity: f64,
     /// Solid, Gradient, Rainbow — how the sung part is filled
     pub fill_style: String,
     // layout
@@ -87,7 +89,7 @@ impl Default for Settings {
             font_family: "Segoe UI".into(), font_size: 40.0, bold: true, italic: false, edge_style: "Outline".into(), outline_width: 2.5, karaoke: true, duet_view: true,
             text_color: "#FFFFFFFF".into(), highlight_color: "#FF4FC3F7".into(), highlight_color2: "#FFB388FF".into(),
             next_color: "#C0FFFFFF".into(), outline_color: "#FF000000".into(), bg_color: "#FF000000".into(),
-            bg_opacity: 0.6, bg_mode: "None".into(), opacity: 1.0, fill_style: "Solid".into(),
+            bg_opacity: 0.6, bg_mode: "None".into(), opacity: 1.0, hover_opacity: 1.0, fill_style: "Solid".into(),
             lines_before: 0, lines_after: 1, next_scale: 0.65, align: "Center".into(), width: 1100.0,
             anim_style: "Slide".into(), anim_ms: 350.0, click_through: false, show_frame: true, hide_when_idle: true, hide_when_no_lyrics: false,
             global_offset: 0.0, positions: HashMap::new(), left: -1, top: -1,

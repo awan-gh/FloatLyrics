@@ -73,6 +73,9 @@ pub struct App {
     started: Instant,
     last_place: Instant,
     last_frame: Instant,
+    hover_mix: f32,
+    hover_target: f32,
+    pub offset_win: Option<OffsetWindow>,
 }
 
 thread_local! { pub static APP: RefCell<Option<App>> = const { RefCell::new(None) }; }
@@ -109,6 +112,9 @@ fn main() {
         hotkey_errors: String::new(), pending_update: None, update_status: String::new(), started: Instant::now(),
         last_place: Instant::now() - Duration::from_secs(5),
         last_frame: Instant::now(),
+        hover_mix: 0.0,
+        hover_target: 0.0,
+        offset_win: None,
     };
     APP.with(|a| *a.borrow_mut() = Some(app));
     with_app(|a| {
@@ -120,6 +126,7 @@ fn main() {
     });
     if std::env::args().any(|x| x == "--settings") { ui::open_settings(); }
     if std::env::args().any(|x| x == "--google-fonts") { ui::open_gf_window(); }
+    if std::env::args().any(|x| x == "--timing") { ui::open_offset(); }
 
     // startup touches lots of one-off pages (font lists, D2D init); give them back once settled
     slint::Timer::single_shot(Duration::from_secs(5), win::trim_memory);
@@ -144,8 +151,18 @@ pub static FRAME_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 /// Called every display refresh. Redraws at full rate only while something moves; otherwise ~10 fps.
 pub fn frame() {
     with_app(|a| {
-        let busy = a.anim.is_some() || a.s.fill_style == "Rainbow" || (a.lyric.is_some() && a.s.karaoke && a.now.lock().unwrap().playing);
-        if busy || a.last_frame.elapsed() >= Duration::from_millis(100) { a.last_frame = Instant::now(); tick(a); }
+        // hover fade: only while click-through (otherwise the mouse is there to drag it)
+        let fade_on_hover = a.applied_ct == Some(true) && a.s.hover_opacity < 0.999;
+        a.hover_target = if fade_on_hover && win::cursor_over(a.hwnd) { 1.0 } else { 0.0 };
+        let dt = a.last_frame.elapsed().as_secs_f32();
+        let fading = (a.hover_mix - a.hover_target).abs() > 0.001;
+        let busy = fading || a.anim.is_some() || a.s.fill_style == "Rainbow" || (a.lyric.is_some() && a.s.karaoke && a.now.lock().unwrap().playing);
+        if busy || a.last_frame.elapsed() >= Duration::from_millis(100) {
+            let step = (dt / 0.15).min(1.0); // ~150 ms fade
+            a.hover_mix += (a.hover_target - a.hover_mix).clamp(-step, step);
+            a.last_frame = Instant::now();
+            tick(a);
+        }
     });
 }
 
@@ -209,6 +226,7 @@ pub fn mark_dirty(a: &mut App) { a.dirty = Some(Instant::now()); }
 pub fn set_song_offset(a: &mut App, v: f64) {
     a.song_offset = (v * 100.0).round() / 100.0;
     if a.song_key.is_empty() { return; }
+    ui::refresh_offset(a);
     if a.song_offset == 0.0 { a.s.song_offsets.remove(&a.song_key); } else { a.s.song_offsets.insert(a.song_key.clone(), a.song_offset); }
     mark_dirty(a);
 }
@@ -216,6 +234,14 @@ pub fn set_song_offset(a: &mut App, v: f64) {
 pub fn position(a: &App) -> f64 { a.now.lock().unwrap().position() + a.s.global_offset + a.song_offset }
 
 /// "The next line starts now."
+/// "-5", "+1.3", "-1.3 sec", "2s" -> seconds. None if it isn't a number.
+pub fn parse_shift(s: &str) -> Option<f64> {
+    let t: String = s.to_lowercase().chars().filter(|c| !c.is_whitespace()).collect();
+    let t = ["seconds", "second", "secs", "sec", "s"].iter().find_map(|u| t.strip_suffix(u)).unwrap_or(&t);
+    let t = t.strip_prefix('+').unwrap_or(t);
+    t.parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
 pub fn tap_sync(a: &mut App) {
     let Some(l) = &a.lyric else { return };
     if l.lines.is_empty() { return; }
@@ -232,6 +258,19 @@ pub fn index(l: &Lyric, pos: f64) -> i64 {
 }
 
 /// Characters sung at `pos` (fractional) for the karaoke wipe.
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn shifts() {
+        assert_eq!(super::parse_shift("- 5 sec"), Some(-5.0));
+        assert_eq!(super::parse_shift("+1.3"), Some(1.3));
+        assert_eq!(super::parse_shift("-1.3s"), Some(-1.3));
+        assert_eq!(super::parse_shift("2 seconds"), Some(2.0));
+        assert_eq!(super::parse_shift("abc"), None);
+        assert_eq!(super::parse_shift(""), None);
+    }
+}
+
 pub fn sung(l: &Line, pos: f64, end: f64) -> f64 {
     let n = l.text.chars().count() as f64;
     if let Some(syls) = &l.syls {
@@ -270,6 +309,7 @@ fn tick(a: &mut App) {
         a.song_offset = a.s.song_offsets.get(&key).copied().unwrap_or(0.0);
         a.status.clear();
         if a.track.is_some() { start_load(a, false); }
+        ui::refresh_offset(a);
         win::tray_tip(a);
     }
     // debounced save
@@ -376,7 +416,7 @@ fn draw(a: &mut App, interactive: bool) {
         hl: render::color(&s.highlight_color), hl2: render::color(&s.highlight_color2), fill,
         // alpha-0 pixels don't receive the mouse, so keep a hint of background while movable
         bg: if interactive && bg.a < 0.004 { render::D2D1_COLOR_F_TRANSPARENT_HIT } else { bg },
-        frame, opacity: s.opacity as f32, padding: 12.0 * scale, slide, fade, clock: a.started.elapsed().as_secs_f64(),
+        frame, opacity: s.opacity as f32 * (1.0 - a.hover_mix * (1.0 - s.hover_opacity as f32)), padding: 12.0 * scale, slide, fade, clock: a.started.elapsed().as_secs_f64(),
     };
     let (main_c, other_c) = (render::color(&s.text_color), render::color(&s.next_color));
     // fill style also colours the whole current line when the wipe is off

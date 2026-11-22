@@ -70,6 +70,12 @@ pub fn show_taskbar(h: HWND, on: bool) {
     }
 }
 
+pub fn cursor_over(h: HWND) -> bool {
+    let mut p = POINT::default();
+    let r = rect(h);
+    unsafe { GetCursorPos(&mut p).is_ok() && p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom }
+}
+
 pub fn dpi_scale(h: HWND) -> f32 { unsafe { GetDpiForWindow(h).max(96) as f32 / 96.0 } }
 
 fn rect(h: HWND) -> RECT { let mut r = RECT::default(); unsafe { let _ = GetWindowRect(h, &mut r); } r }
